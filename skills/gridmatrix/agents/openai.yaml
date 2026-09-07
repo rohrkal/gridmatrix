@@ -1,0 +1,4 @@
+interface:
+  display_name: "Gridmatrix"
+  short_description: "Coordinate Claude Code and Codex across projects"
+  default_prompt: "Use $gridmatrix to coordinate Claude Code and Codex on this project."
