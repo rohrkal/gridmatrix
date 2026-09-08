@@ -1,7 +1,8 @@
 # Adoption and migration
 
-Prerequisites: Python 3.9+ and Git. Works on Windows with Python/Git, macOS and
-Linux. Use `python` instead of `python3` where appropriate. This installer is
+Prerequisites: Python 3.9+ and Git (2.38+ for integration checks). The core uses
+portable Python/Git; Windows-specific behavior remains unvalidated. Strict hook
+auto-install requires POSIX. Use `python` instead of `python3` where appropriate. This installer is
 project-local; it never changes global agent settings or installs launch hooks.
 
 ## New or inherited project
@@ -79,23 +80,17 @@ remove old project skill copies only after confirming they are Gridmatrix-owned.
 The single `gridmatrix` skill now contains all five procedures. Personal v1 skills
 may need disabling in their platform UI; do not delete unrelated skills.
 
-## Recovery and channel limits
+## Upgrading v2.0 to v2.1
 
-If a writer disappears, inspect its worktree/branch and user-visible task state.
-Do not steal ownership because a timer elapsed. Once that writer has stopped,
-resume its recorded session identity only with explicit user-directed recovery,
-or have the owner issue `transfer` to a new session of the same platform, from
-the destination clean worktree, with evidence. Transfer invalidates approval.
-For a different builder platform, close/split the task and review contributions
-independently; never erase the original builder's identity.
+Stop both writers and update both installed project copies with init. Configuration
+and new ledgers use schema 3; old actors reject schema 3 rather than bypass new
+gates. Run `upgrade --actor PLATFORM:SESSION` once to migrate the existing ledger
+without losing tasks, notices, lessons or receipts. The migration is atomic.
+Existing approvals still require fresh integration evidence before finish.
+Commit the updated project files so all clones receive the same runtime.
 
-To switch local/remote transport, stop both agents, export `ledger.json` from the
-old ledger commit, preserve its commit history in the new coordination ref, and
-verify matching content before changing config in both checkouts. This release
-intentionally has no automatic migration or stale-lock takeover command.
-
-A GitHub connector alone is not a local Git transport. If the runtime lacks a
-Git-authenticated checkout, use available authorized integration capabilities to
-obtain one, or leave a precise manual relay. Report that live coordination is
-unavailable until both actors can read and atomically write the same ledger. Do
-not promise that installing a Markdown skill grants credentials or starts agents.
+Recovery, bounded execution and optional integrations are documented in
+[execution.md](execution.md). Use explicit operator recovery instead of assuming
+a lost actor's identity. A GitHub connector alone does not provide a local Git
+transport; both execution environments need access to the configured coordinator.
+No skill grants credentials or installs the peer CLI automatically.

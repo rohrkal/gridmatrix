@@ -1,4 +1,44 @@
-# Gridmatrix review — 2026-09-07
+# Gridmatrix review
+
+## v2.1 — 2026-09-08
+
+The v2.0 protocol prevented ledger collisions, but left execution, integration
+and recovery largely procedural. This update makes those steps executable.
+
+| Gap | Improvement |
+| --- | --- |
+| A recorded handoff could wait indefinitely | Optional bounded Claude headless, Codex exec and App Server review adapters; honest offline handoff |
+| Test claims were handwritten | Command runner captures exit status, source SHA, logs and hashes; mutated source fails validation |
+| Approval did not validate the target branch | Isolated integration candidate tests, target-drift rejection and actual merged-tree verification |
+| Separate files could violate shared interfaces | Completed dependency checks and pinned contract blobs |
+| Lost owners/reporters could strand work | Explicit recovery preserves identities, authorization and verification obligations |
+| Advisory scopes were easy to overlook | Guard command, opt-in strict Claude hooks and identity-bound MCP tools |
+| Stored lessons had no outcome feedback | Task measurements and lesson outcomes; missing observations stay unknown |
+| Peer calls could loop, overspend or accept malformed output | Atomic run budget, no recursive dispatch, wall-time/output caps and strict result validation |
+
+Validation: **37 automated tests passed locally**, covering the original Git
+coordination tests plus all three adapter protocols, timeout/output/failure paths,
+recovery, migration, dependencies, contracts, integration drift, hooks, MCP and
+learning records. Adapter tests use synthetic executable fixtures, not real models.
+
+An independent Codex session resumed a temporary Claude-first project, recovered
+ownership with authorization, captured four passing application tests, and
+submitted the preserved source commit. It correctly left review pending because
+Claude was unavailable. Its rejected self-acknowledgment exposed a wording gap;
+the skill now explicitly excludes acknowledging your own notices.
+
+Remaining validation: authenticated live runs in both directions, native platform
+UI discovery, Windows-specific behavior and deployment-specific required checks.
+The adapters are implemented and fixture-tested; do not call them live-validated.
+The GitHub test workflow is the repeatable gate for Python 3.9 and 3.12.
+
+Tool contracts: [Codex exec](https://developers.openai.com/codex/non-interactive-mode),
+[Codex App Server](https://developers.openai.com/codex/app-server),
+[Claude headless](https://code.claude.com/docs/en/headless),
+[Claude hooks](https://code.claude.com/docs/en/hooks),
+[MCP stdio](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports).
+
+## Original review — 2026-09-07
 
 Reviewed the original uploaded skill, installer, templates and four supporting
 skills at `56b436f45665d602f28d36aa9446e9ee3b28e2db`. Reworked the kit as v2.0.0.
@@ -29,7 +69,7 @@ rather than the deprecated MCP-server route. Gridmatrix remains usable through
 a durable shared ledger without assuming that bridge is installed.
 [Official OpenAI documentation](https://developers.openai.com/codex/mcp-server).
 
-## Validation
+### v2.0 validation
 
 Automated tests cover real Git worktrees and separate clones sharing a bare
 remote, simultaneous claims, message resolution, role separation, stale approval,
@@ -50,7 +90,7 @@ user's local installations, hosted Git authentication on their machines, or
 production branch-protection integration. Test actor labels simulate platforms;
 they are not evidence that both real models executed the workflow.
 
-## Deliberate limits
+### Deliberate limits
 
 No background agent launcher, automatic stale-owner takeover, unreviewed lesson
 promotion, or permission bypass. Remote outage fails closed. Local mode is for

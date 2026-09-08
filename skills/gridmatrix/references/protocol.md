@@ -1,4 +1,4 @@
-# Ledger protocol v2
+# Ledger protocol v3 (Gridmatrix 2.1)
 
 ## Commands
 
@@ -79,7 +79,7 @@ Required fields below are in addition to id/op/actor.
 | claim | task, base, goal, scope[], acceptance[] | New ID, clean named branch, no active overlapping scope/workspace/branch |
 | submit | task, head, summary, evidence, not_done, next | Current owner; clears previous review |
 | review | task, head, verdict (pass/changes), evidence, limits | Other platform; exact submitted clean HEAD |
-| finish | task, head, evidence | Owner; exact approved clean HEAD; no blockers; record integration/acceptance evidence |
+| finish | task, head, integrated_commit, evidence | Owner; exact approved head, captured integration pass and matching actual target tree |
 | cancel | task, evidence | Owner; preserves history and frees scope; never deletes source |
 | transfer | task, to (actor), evidence | Owner relinquishes to same platform session; run from destination; verify old writer stopped; clears review |
 | notice | task (ID or *), to (platform or *), kind, severity, summary, evidence | Any actor; ID becomes notice ID |
@@ -126,11 +126,13 @@ separate: push the task branch before inviting remote review.
 
 The helper mechanically enforces cooperative claims, lifecycle, identity labels,
 message resolution and commit matching. It cannot stop an agent from using other
-shell tools to edit files, attest tests were executed, prevent forged actor labels,
+shell tools to edit files, judge test adequacy, prevent forged actor labels,
 or provide atomicity between a ledger check and a later source merge. Project CI,
 branch protections and an authorized single integrator remain necessary where
 strong enforcement is required. Do not install or broaden hooks/permissions
-silently. `finish` is a coordination record, not proof of deployment or merge.
+silently. `finish` verifies target commit membership and the tested tree; it does
+not prove deployment or CI success. Captured runs establish command execution;
+free-text evidence remains an attributed claim.
 
 No daemon is bundled. Active agents check at boundaries; dormant agents read next
 session. Both source and ledger access must be demonstrated before claiming live
@@ -147,3 +149,20 @@ The default status omits closed records to reduce context; consult `--all` only
 for relevant history. The ledger is intentionally project-scoped, not a global
 instruction or credential store. A large project's archive/compaction needs an
 explicit history-preserving migration; this version does not silently prune it.
+
+## Execution and learning extensions
+
+Read [execution.md](execution.md) for captured runs, peer adapters, integration,
+operator recovery, hooks and MCP. New claims accept depends_on (completed task IDs),
+contracts (relative path → agreed Git blob SHA), task_class and model.
+Submit optionally accepts evidence_runs (captured passing IDs at the same HEAD).
+
+`measure`: completed task, escaped_defects and rework_rounds (nonnegative integers),
+evidence. Measurements are attributed observations, not automatic performance scores.
+`lesson-outcome`: lesson, task, result (helped/recurred/not-applicable), evidence.
+`metrics` returns comparable task and lesson observations without promoting rules.
+
+Runtime-only capture/integration events are written by the runner; ordinary
+`apply` cannot manufacture a capture by supplying report fields. Operator recovery
+requires a separate explicit CLI flag and records the authorization statement.
+These are cooperative controls, not a security boundary against arbitrary code.

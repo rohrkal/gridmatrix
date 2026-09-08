@@ -237,11 +237,15 @@ class GitTests(unittest.TestCase):
         other = self.base / 'review'
         run(self.root, 'worktree', 'add', '--detach', str(other), head)
         cli(other, 'apply', '-', data=json.dumps(review))
+        commands = self.base / 'checks.json'
+        commands.write_text(json.dumps([[sys.executable, '-c', 'import app; assert app.answer == 42']]))
+        cli(self.root, 'integrate', '--task', 'T1', '--actor', 'codex:a', '--id', 'integration', '--target', 'refs/heads/main', '--commands', str(commands))
         cli(self.root, 'check', '--task', 'T1')
         (self.root / 'app.py').write_text('answer = 43\n')
         self.assertNotEqual(cli(self.root, 'check', '--task', 'T1', ok=False).returncode, 0)
         (self.root / 'app.py').write_text('answer = 6 * 7\n')
-        cli(self.root, 'apply', '-', data=json.dumps(dict(id='finish', op='finish', actor='codex:a', task='T1', head=head, evidence='accepted at head')))
+        run(self.root, 'update-ref', 'refs/heads/main', head)
+        cli(self.root, 'apply', '-', data=json.dumps(dict(id='finish', op='finish', actor='codex:a', task='T1', head=head, integrated_commit=head, evidence='accepted at head')))
         self.assertEqual(json.loads(cli(self.root, 'status').stdout)['state']['tasks'], {})
 
 if __name__ == '__main__':

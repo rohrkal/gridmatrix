@@ -14,7 +14,7 @@ import tempfile
 import uuid
 from datetime import datetime, timezone
 
-VERSION = '2.0.0'
+VERSION = '2.1.0'
 PLATFORMS = {'codex', 'claude-code'}
 BEGIN, END = '<!-- gridmatrix:begin -->', '<!-- gridmatrix:end -->'
 BLOCK = f'''{BEGIN}
@@ -57,7 +57,7 @@ def root_at(path):
     return Path(git(path, 'rev-parse', '--show-toplevel').stdout.strip()).resolve()
 
 def empty():
-    return {'schema': 2, 'tasks': {}, 'notices': {}, 'lessons': {}, 'receipts': {}}
+    return {'schema': 3, 'tasks': {}, 'notices': {}, 'lessons': {}, 'receipts': {}, 'runs': {}}
 
 def actor(value):
     require(isinstance(value, str) and re.fullmatch(r'(codex|claude-code):[A-Za-z0-9._-]+', value),
@@ -88,7 +88,7 @@ def blockers(state, task):
 def transition(state, r, context):
     """Validate one request against the latest state. Never trust a stale claim."""
     s = copy.deepcopy(state)
-    require(s.get('schema') == 2, 'unsupported ledger schema')
+    require(s.get('schema') in (2, 3), 'unsupported ledger schema')
     who = required(r, 'actor'); platform = actor(who)
     rid = required(r, 'id')
     require(re.fullmatch(r'[A-Za-z0-9._-]{1,100}', rid), 'invalid request id')
@@ -97,7 +97,11 @@ def transition(state, r, context):
         require(s['receipts'][rid]['hash'] == fingerprint, 'request id reused with different content')
         return s
     op = required(r, 'op')
-    if op == 'claim':
+    require(s['schema'] == 3 or op == 'upgrade', 'run upgrade before writing the v2 ledger')
+    s.setdefault('runs', {})
+    if op == 'upgrade':
+        s['schema'] = 3
+    elif op == 'claim':
         tid = required(r, 'task')
         require(re.fullmatch(r'[A-Za-z0-9._-]{1,100}', tid), 'invalid task id')
         require(tid not in s['tasks'], 'task already exists; inspect its owner')
@@ -115,11 +119,23 @@ def transition(state, r, context):
         acceptance = r.get('acceptance')
         require(isinstance(acceptance, list) and acceptance and all(isinstance(x, str) and x.strip() for x in acceptance),
                 'acceptance must contain checkable criteria')
+        dependencies = r.get('depends_on', [])
+        require(isinstance(dependencies, list) and all(isinstance(x, str) for x in dependencies), 'invalid dependencies')
+        for dep in dependencies:
+            require(dep in s['tasks'] and s['tasks'][dep]['status'] == 'done', 'dependency is not done: ' + dep)
+        contracts = r.get('contracts', {})
+        require(isinstance(contracts, dict), 'contracts must map paths to Git blob SHAs')
+        for path, digest in contracts.items():
+            scope_path(path)
+            require(isinstance(digest, str) and re.fullmatch(r'[0-9a-f]{40,64}', digest), 'invalid contract SHA')
         base = required(r, 'base')
         s['tasks'][tid] = {'id': tid, 'owner': who, 'builder_platform': platform,
                           'scope': scopes, 'goal': required(r, 'goal'), 'acceptance': acceptance,
                           'base': base, 'branch': context['branch'], 'workspace': context['workspace'],
-                          'status': 'building', 'head': None, 'review': None, 'handoff': None}
+                          'status': 'building', 'head': None, 'review': None, 'handoff': None,
+                          'depends_on': dependencies, 'contracts': contracts, 'integration': None,
+                          'task_class': r.get('task_class', 'unspecified'), 'model': r.get('model', 'unknown'),
+                          'review_rounds': 0}
     elif op in ('submit', 'review', 'finish', 'cancel', 'transfer'):
         tid = required(r, 'task'); require(tid in s['tasks'], 'unknown task')
         t = s['tasks'][tid]
@@ -132,8 +148,10 @@ def transition(state, r, context):
             require(verdict in ('pass', 'changes'), 'verdict must be pass or changes')
             if verdict == 'pass':
                 require(not blockers(s, tid), 'blocking notices must be resolved before approval')
+            t['review_rounds'] = t.get('review_rounds', 0) + 1
             t['review'] = {'actor': who, 'head': t['head'], 'verdict': verdict,
-                           'evidence': required(r, 'evidence'), 'limits': required(r, 'limits')}
+                           'evidence': required(r, 'evidence'), 'limits': required(r, 'limits'),
+                           'model': r.get('model', 'unknown')}
             t['status'] = 'approved' if verdict == 'pass' else 'building'
         else:
             require(who == t['owner'], 'only the task owner can perform this operation')
@@ -144,14 +162,16 @@ def transition(state, r, context):
                 require(required(r, 'head') == context['head'], 'submit must identify current HEAD')
                 require(context['workspace'] == t['workspace'] and context['branch'] == t['branch'],
                         'submit from the claimed worktree and branch, or transfer first')
-                t.update(status='review', head=r['head'], review=None,
+                t.update(status='review', head=r['head'], review=None, integration=None,
                          handoff={'summary': required(r, 'summary'), 'evidence': required(r, 'evidence'),
                                   'not_done': required(r, 'not_done'), 'next': required(r, 'next')})
             elif op == 'finish':
                 require(t['status'] == 'approved', 'independent approval required')
                 require(required(r, 'head') == t['head'] == context['head'], 'approval is stale')
                 require(not blockers(s, tid), 'unresolved blocking notice')
-                t.update(status='done', outcome=required(r, 'evidence'))
+                require(context.get('integration_verified'), 'verify actual integration before finish')
+                require(t.get('integration') and t['integration']['head'] == t['head'], 'missing integration evidence')
+                t.update(status='done', outcome=required(r, 'evidence'), integrated_commit=required(r, 'integrated_commit'))
             elif op == 'cancel':
                 t.update(status='cancelled', outcome=required(r, 'evidence'))
             else:
@@ -159,7 +179,7 @@ def transition(state, r, context):
                 require(actor(successor) == t['builder_platform'],
                         'owner transfer preserves builder platform; split work for a different builder')
                 t.update(owner=successor, workspace=context['workspace'], branch=context['branch'],
-                         status='building', head=None, review=None,
+                         status='building', head=None, review=None, integration=None,
                          transfer_evidence=required(r, 'evidence'))
                 for other in s['tasks'].values():
                     if other['id'] != tid and other['status'] not in ('done', 'cancelled'):
@@ -179,11 +199,72 @@ def transition(state, r, context):
         nid = required(r, 'notice'); require(nid in s['notices'], 'unknown notice')
         n = s['notices'][nid]; require(n['status'] != 'resolved', 'notice already resolved')
         if op == 'resolve':
-            require(who == n['from'], 'reporter must verify resolution; recipient acknowledges with evidence')
+            require(who == n.get('resolver', n['from']), 'assigned reporter/verifier must verify resolution')
         else:
             require(n['to'] in ('*', platform) and who != n['from'], 'only recipient may respond')
         n['responses'].append({'actor': who, 'action': op, 'evidence': required(r, 'evidence')})
         n['status'] = {'ack': 'acknowledged', 'resolve': 'resolved', 'dispute': 'disputed'}[op]
+    elif op == 'recover-run':
+        require(context.get('recovery_authorized'), 'recovery requires explicit operator authorization')
+        run = required(r, 'run')
+        require(run + '-start' in s['runs'] and run not in s['runs'], 'run is not abandoned/in-flight')
+        start = s['runs'][run + '-start']
+        require(start['actor'] == who, 'original coordinator must recover its run')
+        s['runs'][run] = {'kind': 'peer', 'passed': False, 'status': 'operator-cancelled', 'task': start['task'],
+                          'actor': who, 'authorization': required(r, 'authorization'), 'evidence': required(r, 'evidence')}
+    elif op == 'recover':
+        require(context.get('recovery_authorized'), 'recovery requires explicit operator authorization')
+        reason = required(r, 'authorization')
+        required(r, 'evidence')
+        if 'notice' in r:
+            n = s['notices'].get(r['notice']); require(n and n['status'] != 'resolved', 'notice is not open')
+            successor = required(r, 'to'); actor(successor)
+            t = s['tasks'].get(n['task'])
+            require(not t or actor(successor) != t['builder_platform'], 'replacement verifier must be independent of builder')
+            n['resolver'] = successor
+            n['responses'].append({'actor': who, 'action': 'reassign-verifier', 'to': successor,
+                                   'authorization': reason, 'evidence': r['evidence']})
+        else:
+            t = s['tasks'].get(r.get('task')); require(t and t['status'] not in ('done', 'cancelled'), 'task is not active')
+            require(required(r, 'expected_owner') == t['owner'], 'owner changed; recovery is stale')
+            successor = required(r, 'to'); actor(successor)
+            require(actor(successor) == t['builder_platform'], 'recover to original builder platform; preserve authorship')
+            require(context['branch'], 'recovery requires named destination branch')
+            for other in s['tasks'].values():
+                if other['id'] != t['id'] and other['status'] not in ('done', 'cancelled'):
+                    require(other['workspace'] != context['workspace'] and other['branch'] != context['branch'], 'destination already claimed')
+            t.setdefault('recoveries', []).append({'from': t['owner'], 'to': successor, 'authorization': reason, 'evidence': r['evidence']})
+            t.update(owner=successor, workspace=context['workspace'], branch=context['branch'],
+                     status='building', head=None, review=None, integration=None)
+    elif op in ('capture', 'integration'):
+        require(context.get('runtime_record'), 'use the evidence/integration runner to record execution')
+        t = s['tasks'].get(r.get('task')); require(t, 'unknown task')
+        require(t['owner'] == who or platform != t['builder_platform'], 'invalid evidence actor')
+        report = r.get('report'); require(isinstance(report, dict), 'missing report')
+        if report.get('kind') == 'peer-start':
+            require(who == t['owner'], 'only task owner may start peer runs')
+            starts = [(key, value) for key, value in s['runs'].items() if value.get('kind') == 'peer-start' and value.get('task') == t['id']]
+            require(all(key[:-6] in s['runs'] for key, _ in starts), 'another peer run is active; inspect or recover it')
+            require(type(report.get('max_runs')) is int and 1 <= report['max_runs'] <= 10, 'invalid run budget')
+            require(len(starts) < report['max_runs'], 'peer run budget exhausted')
+        if op == 'integration':
+            require(who == t['owner'] and t['status'] == 'approved', 'approved task owner must validate integration')
+            require(report.get('head') == t['head'] and report.get('passed'), 'integration checks did not pass at task head')
+            require(not blockers(s, t['id']), 'unresolved blocking notice')
+            t['integration'] = report
+        s['runs'][rid] = dict(report, actor=who, task=t['id'])
+    elif op == 'measure':
+        t = s['tasks'].get(r.get('task')); require(t and t['status'] == 'done', 'measure a completed task')
+        require(who == t['owner'] or platform != t['builder_platform'], 'invalid measurement actor')
+        for key in ('escaped_defects', 'rework_rounds'):
+            require(type(r.get(key)) is int and r[key] >= 0, 'metrics must be nonnegative integers')
+        t.setdefault('measurements', []).append({'actor': who, 'escaped_defects': r['escaped_defects'],
+                                                'rework_rounds': r['rework_rounds'], 'evidence': required(r, 'evidence')})
+    elif op == 'lesson-outcome':
+        lesson = s['lessons'].get(r.get('lesson')); require(lesson, 'unknown lesson')
+        require(r.get('task') in s['tasks'], 'unknown task')
+        require(r.get('result') in ('helped', 'recurred', 'not-applicable'), 'invalid lesson result')
+        lesson.setdefault('outcomes', []).append({'actor': who, 'task': r['task'], 'result': r['result'], 'evidence': required(r, 'evidence')})
     elif op == 'learn':
         s['lessons'][rid] = {'id': rid, 'author': who, 'scope': scope_path(required(r, 'scope')),
                              'rule': required(r, 'rule'), 'evidence': required(r, 'evidence'),
@@ -208,7 +289,7 @@ class Ledger:
     def __init__(self, root):
         self.root = root
         self.config = json.loads((root / '.gridmatrix/config.json').read_text())
-        require(self.config.get('schema') == 2, 'unsupported config schema')
+        require(self.config.get('schema') in (2, 3), 'unsupported config schema')
         self.remote = self.config.get('remote')
         self.ref = 'refs/heads/' + self.config['branch'] if self.remote else 'refs/gridmatrix/state'
         git(root, 'check-ref-format', self.ref)
@@ -237,7 +318,7 @@ class Ledger:
         raw = git(self.root, 'show', head + ':ledger.json', check=False)
         require(raw.returncode == 0, 'coordination ref exists but is not a Gridmatrix ledger; do not overwrite it')
         state = json.loads(raw.stdout)
-        require(state.get('schema') == 2, 'unsupported ledger schema')
+        require(state.get('schema') in (2, 3), 'unsupported ledger schema')
         return head, state
 
     def apply(self, request, context):
@@ -296,11 +377,11 @@ def install(root, remote, dry):
     safe_target(root, configpath)
     existing = json.loads(configpath.read_text()) if configpath.exists() else None
     if existing:
-        require(existing.get('schema') == 2, 'unsupported existing config; migration required')
+        require(existing.get('schema') in (2, 3), 'unsupported existing config; migration required')
         require(remote is None or remote == existing.get('remote'), 'transport change requires explicit ledger migration')
-        config = existing
+        config = dict(existing, schema=3, version=VERSION)
     else:
-        config = {'schema': 2, 'version': VERSION, 'remote': remote, 'branch': 'gridmatrix-state'}
+        config = {'schema': 3, 'version': VERSION, 'remote': remote, 'branch': 'gridmatrix-state'}
     if remote:
         require(remote in git(root, 'remote').stdout.splitlines(), 'remote does not exist')
     files = {configpath: dumps(config)}
@@ -335,7 +416,13 @@ def context_at(root):
             'workspace': socket.gethostname() + ':' + str(root)}
 
 def main(argv=None):
-    p = argparse.ArgumentParser(description=__doc__)
+    if argv is None:
+        argv = sys.argv[1:]
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import gm_runtime
+    if gm_runtime.dispatch(argv, globals()):
+        return
+    p = argparse.ArgumentParser(description=__doc__, epilog='Execution commands: doctor, upgrade, evidence, peer, integrate, guard, metrics, hook, mcp. Use COMMAND --help for options.')
     p.add_argument('--repo', default='.', help='project path (spaces supported)')
     sub = p.add_subparsers(dest='command', required=True)
     ini = sub.add_parser('init', help='install/update skill and preserve project instructions')
@@ -350,6 +437,7 @@ def main(argv=None):
     apply.add_argument('file', help='JSON request file; - reads stdin')
     check = sub.add_parser('check', help='check installation or exact task approval; does not run project tests')
     check.add_argument('--task')
+    apply.add_argument('--authorize-recovery', action='store_true')
     args = p.parse_args(argv)
     if args.command == 'session':
         print(uuid.uuid4().hex[:16]); return
@@ -360,6 +448,8 @@ def main(argv=None):
     ctx = context_at(root)
     if args.command == 'apply':
         r = json.load(sys.stdin) if args.file == '-' else json.loads(Path(args.file).read_text())
+        ctx['recovery_authorized'] = args.authorize_recovery
+        gm_runtime.preflight(root, ledger, r, ctx, globals())
         if r.get('op') == 'claim':
             require(ctx['branch'], 'claim requires a named task branch')
             require(not git(root, 'status', '--porcelain').stdout, 'claim requires clean worktree; preserve existing changes')
@@ -371,7 +461,7 @@ def main(argv=None):
             require(resolved == r['base'], 'base must be a full commit SHA')
             require(git(root, 'merge-base', '--is-ancestor', resolved, 'HEAD', check=False).returncode == 0,
                     'base must be an ancestor of task HEAD')
-        if r.get('op') in ('submit', 'review', 'finish', 'transfer'):
+        if r.get('op') in ('submit', 'review', 'finish', 'transfer', 'recover'):
             require(not git(root, 'status', '--porcelain').stdout, 'commit/preserve changes before review operations')
         if r.get('op') == 'submit':
             _, current = ledger.load()
@@ -413,6 +503,7 @@ def main(argv=None):
             require(t['head'] == ctx['head'] == t['review']['head'], 'approval is stale for current HEAD')
             require(not git(root, 'status', '--porcelain').stdout, 'dirty worktree invalidates check')
             require(not blockers(state, args.task), 'unresolved blocking notice')
+            gm_runtime.verify_integration(root, t, globals())
         print('OK: ' + ('task approval matches HEAD; project CI remains required' if args.task else
                          'installation structure only; adoption and project tests are not certified'))
 
