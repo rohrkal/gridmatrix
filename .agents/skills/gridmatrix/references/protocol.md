@@ -1,4 +1,4 @@
-# Ledger protocol v3 (Gridmatrix 2.1)
+# Ledger protocol v3 (Gridmatrix 2.2.0)
 
 ## Commands
 
@@ -10,6 +10,10 @@ reading the spec and diff, use `status --handoff TASK` to retrieve that rational
 `apply request.json` (or `apply -` with JSON stdin) is the only write entrypoint.
 `check` validates installation; `check --task T-001` additionally checks independent
 approval against the current clean HEAD and outstanding blocking notices.
+`next --actor ACTOR` lists only what that identity can act on; `watch --actor ACTOR
+--timeout N` blocks until something newly actionable appears, without consuming
+model turns. `repair-ledger --actor ACTOR` fixes only the legacy Windows
+`ledger.json` carriage-return tree. All four are reads except `repair-ledger`.
 
 Use a unique stable `id` per request; retry the *same* body and ID after ambiguous
 network failure. An identical replay returns `already-recorded`; changing the
@@ -23,10 +27,9 @@ identities. The helper does not cryptographically attest which model ran it.
 
 ## Request examples
 
-Claim from a named, clean task branch. Get the full base SHA from Git. Paths are
-literal relative files/directories; `.` reserves the whole project. No globs.
-Reserve generated outputs and dependency lockfiles too. The runtime captures
-branch and hostname + resolved working directory; do not supply invented values.
+Claim from a named, clean task branch with the full base SHA. Scope paths are
+literal files or directories, no globs; `.` reserves the project. Reserve generated
+outputs and lockfiles too. The runtime supplies branch and workspace itself.
 
 ```json
 {
@@ -38,10 +41,10 @@ branch and hostname + resolved working directory; do not supply invented values.
 }
 ```
 
-Submit after committing and sharing source. Use the full HEAD SHA, not a branch
-name. Evidence includes commands, exit codes, observed output and limitations.
-The helper rejects changed paths outside the claim, uncommitted changes and a
-base that is no longer an ancestor. It never runs the evidence text as commands.
+Submit after committing and sharing source, using the full HEAD SHA. Evidence
+gives commands, exit codes, observed output and limitations. The helper rejects
+out-of-scope paths, uncommitted changes and a base that is no longer an ancestor,
+and never executes the evidence text.
 
 ```json
 {
@@ -65,10 +68,9 @@ Review from that clean head, using the other platform's **real** identity:
 }
 ```
 
-Use `changes` for required corrections and log each concrete finding as a notice.
-Use an honest `none` in limitations when everything relevant was verified; do
-not invent a gap to satisfy a template. A `review` transaction is itself a durable
-response to the submitted handoff.
+Use `changes` for required corrections and log each finding as a notice. Write an
+honest `none` in limits when everything relevant was verified; do not invent a gap
+to satisfy a template. A `review` is itself a durable response to the handoff.
 
 ## Operations
 
@@ -78,7 +80,7 @@ Required fields below are in addition to id/op/actor.
 | --- | --- | --- |
 | claim | task, base, goal, scope[], acceptance[] | New ID, clean named branch, no active overlapping scope/workspace/branch |
 | submit | task, head, summary, evidence, not_done, next | Current owner; clears previous review |
-| review | task, head, verdict (pass/changes), evidence, limits | Other platform; exact submitted clean HEAD |
+| review | task, head, verdict (pass/changes), evidence, limits | Other platform; exact submitted clean HEAD. Structured peer output must also name nonempty `inspected` paths, and a `changes` verdict must carry at least one finding: exiting zero is not a review |
 | finish | task, head, integrated_commit, evidence | Owner; exact approved head, captured integration pass and matching actual target tree |
 | cancel | task, evidence | Owner; preserves history and frees scope; never deletes source |
 | transfer | task, to (actor), evidence | Owner relinquishes to same platform session; run from destination; verify old writer stopped; clears review |
@@ -89,6 +91,14 @@ Required fields below are in addition to id/op/actor.
 | learn | scope, rule, evidence | Propose bounded project lesson; ID becomes lesson ID |
 | confirm | lesson, evidence | Other platform verifies; maximum ten active lessons |
 | retire | lesson, evidence | Other platform records why a lesson no longer applies; keeps history |
+
+**A task record cannot be corrected in place.** `claim` refuses an existing ID,
+and `remediate` only records a repair plan and requires active blockers, so neither
+can amend acceptance criteria; a transferred task also keeps its original `base`,
+which makes every change integrated since then read as out-of-scope. When either
+happens, `cancel` with evidence and re-claim under a new ID at the current base.
+Commits are untouched; only the ledger record changes. Prefer that to shipping work
+that knowingly does not match its own stated criteria.
 
 A `COLLISION` always blocks the named task (or all tasks if `task: "*"`).
 S0 = dangerous/major correctness loss; S1 = broken acceptance or contract;
@@ -152,25 +162,20 @@ explicit history-preserving migration; this version does not silently prune it.
 
 ## Execution and learning extensions
 
-Read [execution.md](execution.md) for captured runs, peer adapters, integration,
-operator recovery, hooks and MCP. New claims accept depends_on (completed task IDs),
-contracts (relative path → agreed Git blob SHA), task_class and model.
-Submit optionally accepts evidence_runs (captured passing IDs at the same HEAD).
+See [execution.md](execution.md) for captured runs, peer adapters, integration,
+recovery, hooks and MCP. Claims additionally accept `depends_on` (completed task
+IDs), `contracts` (path → agreed Git blob SHA), `task_class` and `model`. Submit
+accepts `evidence_runs` (captured passing IDs at the same HEAD).
 
-`measure`: completed task, escaped_defects and rework_rounds (nonnegative integers),
-evidence. Measurements are attributed observations, not automatic performance scores.
-`lesson-outcome`: lesson, task, result (helped/recurred/not-applicable), evidence.
-`metrics` returns comparable task and lesson observations without promoting rules.
+`measure` (completed task, escaped_defects, rework_rounds, evidence) and
+`lesson-outcome` (lesson, task, result, evidence) record attributed observations,
+not automatic performance scores; `metrics` returns them without promoting rules.
+`remediate` (task, all current blocking notice IDs, in-scope paths, evidence) is
+owner-only from the claimed building worktree and leaves approval blocked until
+independent resolution.
 
-Runtime-only capture/integration events are written by the runner; ordinary
-`apply` cannot manufacture a capture by supplying report fields. Operator recovery
-requires a separate explicit CLI flag and records the authorization statement.
-These are cooperative controls, not a security boundary against arbitrary code.
-
-`remediate`: task, notices (all current blocking IDs), scope (within task scope),
-evidence. Only the owner in the claimed building worktree can record this plan.
-Approval stays blocked until independent resolution. See execution.md.
-
-`peer-complete` is runtime-only: it atomically validates and publishes the peer's
-findings, optional remediation resolution, review and completed execution record.
-A stale or invalid transaction publishes none of these changes.
+Capture, integration and `peer-complete` are runtime-only: ordinary `apply` cannot
+manufacture them by supplying report fields, and an invalid peer transaction
+publishes nothing. Operator recovery requires its own explicit CLI flag and records
+the authorization statement. These are cooperative controls, not a security
+boundary against arbitrary code.

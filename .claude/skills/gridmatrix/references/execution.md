@@ -1,12 +1,4 @@
-# Execution adapters (2.1.1)
-
-## Contents
-
-- Capability discovery and bounded peers
-- Evidence and integration
-- Recovery
-- Hooks and MCP
-- Limits and compatibility
+# Execution adapters (2.2.0)
 
 ## Capability discovery and bounded peers
 
@@ -131,20 +123,43 @@ its attempt still counts toward the task budget. An explicitly recovered current
 task owner may recover a predecessor run; both identities remain recorded. Never cancel a live process by
 changing ledger state alone. No identity impersonation or automatic timer takeover.
 
+## Cold start, waiting and legacy repair
+
+`next --actor PLATFORM:SESSION` returns only what that identity can act on: open
+notices addressed to it, tasks awaiting its review, verdicts on tasks it owns,
+approved work awaiting its integration, and blocking notices it reported that a
+peer has answered. A task owned by a *different* session of the same platform is
+surfaced as `inspect-owner-or-authorized-recovery` with the owning actor named, so
+a new session can discover in-flight work. Visibility is not ownership: taking that
+task still requires explicit operator recovery.
+
+`watch --actor PLATFORM:SESSION --timeout SECONDS` baselines current state, then
+returns only when something *newly* actionable appears or the timeout expires. It
+also watches the integration target, because a peer advancing that branch is a Git
+event with no ledger write and would otherwise be missed. It waits without
+consuming model turns, so idle time costs no budget; a poll built from repeated
+agent turns spends on every empty check and should not be used instead.
+
+`repair-ledger --actor PLATFORM:SESSION` repairs exactly one historical defect: a
+coordination tree whose single entry is named `ledger.json` with a trailing
+carriage return, produced by the pre-fix Windows runtime. It validates the blob as
+a supported ledger before writing, preserves parent history, publishes with an
+expected-old update or a non-forced push, and reports `already-healthy` when there
+is nothing to repair. It refuses every other malformed shape rather than guessing.
+
 ## Hooks and MCP
 
 `guard --task T --actor PLATFORM:SESSION PATH...` checks branch, workspace,
 status, blockers and literal write scope. It performs no edit.
 
-`hook --install` explicitly merges strict Claude hooks into project settings,
-preserving other hooks. POSIX auto-install uses python3 on PATH. Windows users can
-configure the same `hook` command in their supported shell. Set `GRIDMATRIX_ACTOR`
-and `GRIDMATRIX_TASK` in the launched writer's environment. SessionStart injects
-current state; PreToolUse denies unsupported/out-of-scope writes. Successful checks
-defer to existing Claude permissions. Strict mode denies Bash/PowerShell because
-arbitrary shell writes cannot be safely classified. Run approved checks via the
-coordinator evidence command outside that restricted Claude session. This mode is
-opt-in, not part of ordinary init. It does not intercept external filesystem edits.
+`hook --install` merges strict Claude hooks into project settings, preserving
+others. **Auto-install refuses non-POSIX by design**, so Windows users configure the
+same `hook` command manually in their shell. Set `GRIDMATRIX_ACTOR` and
+`GRIDMATRIX_TASK` for the launched writer. SessionStart injects current state;
+PreToolUse denies out-of-scope writes and defers otherwise to existing Claude
+permissions. Strict mode denies Bash/PowerShell because arbitrary shell writes
+cannot be classified; run approved checks through the evidence command outside that
+session. Opt-in, not part of init, and it does not intercept external edits.
 
 `mcp --actor PLATFORM:SESSION` runs a stdio server using newline JSON-RPC.
 Configure it in either platform with executable python3 and args:
@@ -153,12 +168,12 @@ Configure it in either platform with executable python3 and args:
 ["/absolute/path/to/gridmatrix.py", "--repo", "/absolute/project", "mcp", "--actor", "codex:SESSION"]
 ```
 
-Generate a fresh actor per launched session. Server configuration binds the actor;
-request bodies cannot override it. Tools: read_inbox, claim_task, report_defect,
-submit_review, transact (including scoped remediate). They call the same validated CLI. Runtime execution,
-recovery, integration, ownership cancellation and permission configuration are
-excluded. The local stdio boundary inherits the launcher identity and permissions;
-it is not a remotely authenticated multi-user server.
+Generate a fresh actor per session; server configuration binds it and request
+bodies cannot override it. Tools: read_inbox (actor-filtered, same as `next`),
+claim_task, report_defect, submit_review, transact. Runtime execution, recovery,
+integration, ownership cancellation and permission configuration are excluded. The
+local stdio boundary inherits the launcher's identity and permissions; it is not a
+remotely authenticated multi-user server.
 
 ## Limits and compatibility
 
@@ -168,6 +183,12 @@ platform UI discovery must be exercised in the target environment. A fixture
 returning a Claude/Codex-shaped response is never reported as a live model test.
 Shared session labels and reports remain cooperative metadata, not cryptographic
 model attestation. Use normal OS isolation and project protections.
+
+**No peer adapter has executed in either maintainer environment.** Neither a
+Claude nor a Codex CLI was installed, so `doctor` reports `missing-cli` and every
+adapter behaviour below is verified by unit tests and code reading only. Treat a
+passing suite as evidence the plumbing is consistent, never as evidence that a
+live peer review has ever run.
 
 References: [Codex exec](https://developers.openai.com/codex/non-interactive-mode),
 [App Server](https://developers.openai.com/codex/app-server),

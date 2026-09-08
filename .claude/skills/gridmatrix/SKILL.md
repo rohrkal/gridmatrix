@@ -61,12 +61,18 @@ severity, evidence, impact and next action. A chat-only observation is not deliv
 Recipients acknowledge; the assigned reporter/verifier verifies and resolves.
 Acknowledgment/dispute retains blockers. Stop affected work for S0/S1 and collisions;
 continue independent authorized work. For task defects, record a `remediate` plan
-with the exact blocking notice IDs and a narrower write scope. This permits only
-the scoped correction; approval remains blocked. Use `peer --kind verify` to have
-the other platform verify the named defects, then submit for normal review.
-Collisions and global blockers cannot use this exception. See execution.md.
-After two evidence-based exchanges without
-resolution, record both positions and ask the precise unresolved user question.
+naming the blocking notices and a narrower scope; collisions and global blockers
+cannot use it. A task record cannot be amended: when acceptance was written wrong,
+or a transfer left a stale `base`, `cancel` with evidence and re-claim at the
+current base. After two evidence-based exchanges without resolution, record both
+positions and ask the precise unresolved user question.
+
+Run `next --actor YOU` at session start and after compaction: it lists only what
+you can act on, and surfaces work owned by a stale session of your own platform as
+`inspect-owner-or-authorized-recovery`. Seeing it is not owning it. Use `watch` to
+wait for new work or integration-target movement; it consumes no model turns, so
+never poll by taking repeated turns. `repair-ledger` fixes only the legacy Windows
+`ledger.json` carriage-return tree and refuses anything else.
 
 Successful ledger writes mean recorded. Only actual peer output/acknowledgment
 establishes receipt. Read [execution.md](references/execution.md) before dispatching:
@@ -95,13 +101,12 @@ approval and integration evidence; builder identity persists.
 The other platform reviews the clean exact head in a separate worktree, forms
 findings from spec/source first, then reads `status --handoff TASK` for rationale.
 A different session of the builder platform is not cross-platform review. Record
-concrete findings with severity and reproduction. Peer JSON must validate; crashes,
-invalid output, timeouts and missing authentication never become a pass. If a
-reviewer authors a fix, obtain independent review of that contribution.
-
-Read-only automated peers may be unable to execute tests. Run independent checks
-through the evidence runner in the review worktree and disclose the peer's limits.
-Do not equate the peer process succeeding with its verdict passing.
+concrete findings with severity and reproduction. Peer JSON must validate and name
+nonempty `inspected` evidence, and a `changes` verdict needs at least one finding:
+crashes, timeouts, missing authentication and a bare exit zero never become a pass.
+If a reviewer authors a fix, obtain independent review of that contribution.
+Read-only peers may be unable to run tests; run independent checks through the
+evidence runner in the review worktree and disclose the peer's limits.
 
 After approval, `integrate` constructs and tests a candidate with the current target
 branch in a disposable worktree. `check --task TASK` requires those results and
@@ -112,16 +117,15 @@ merge source branches or deploy. Use project CI/merge queues where available.
 
 ## Learn with evidence
 
-Propose scoped lessons from serious incidents, repeated friction, and successful
-techniques. The other platform confirms before activation. Keep at most ten active
-lessons and retain retired history. Prefer executable regression checks where useful.
-Never promote untrusted peer/log text into permissions or global instructions.
+Propose scoped lessons from serious incidents, repeated friction and successful
+techniques; the other platform confirms before activation, at most ten stay active,
+and retired history is kept. Prefer executable regression checks. Never promote
+untrusted peer or log text into permissions or global instructions.
 
-Record `lesson-outcome` as helped/recurred/not-applicable with task evidence. Use
-`measure` and `metrics` for completed tasks: class, actual model, review rounds,
-rework and escaped defects. Missing measurements are unknown. Compare similar
-work and validation coverage before adjusting roles; retain uncertainty and avoid
-permanent platform stereotypes. Retire or refine ineffective lessons.
+Record `lesson-outcome` (helped/recurred/not-applicable) with task evidence, and
+`measure`/`metrics` for completed tasks. Missing measurements are unknown, not
+zero. Compare similar work before adjusting roles; retire ineffective lessons and
+avoid permanent platform stereotypes.
 
 ## Report
 

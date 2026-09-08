@@ -67,41 +67,31 @@ the project's tests. Verify each agent actually discovers this skill: invoke
 skills or `AGENTS.override.md` may shadow project instructions; diagnose and tell
 the user instead of silently changing global configuration.
 
-## Migrating v1
+## Upgrading an existing installation
 
-Quiesce both writers first. Preserve `.agents/{STATE,TASKS,HANDOFF,REVIEW,DECISIONS,FLAGS}.md`
-and inspect open tasks/flags before accepting new claims. Run the v2 installer,
-which replaces only Gridmatrix's marked rules and preserves other text. Translate
-active tasks into ledger claims, open flags into notices, and useful decisions
-into PROJECT.md / proposed lessons. Never carry a v1 audit forward as approval of
-an unverified head. Record source file/commit for every migrated record.
+Quiesce both writers and any in-flight peer runs first, then rerun `init` from the
+updated skill so both project copies match, and commit the reviewed result.
 
-Resolve obsolete references to `gridmatrix-adopt`, `-audit`, `-handoff`, `-retro`,
-and `-session-start` in inherited instructions explicitly, preserving unrelated
-rules. After reconciling all active state, mark legacy files as historical and
-remove old project skill copies only after confirming they are Gridmatrix-owned.
-The single `gridmatrix` skill now contains all five procedures. Personal v1 skills
-may need disabling in their platform UI; do not delete unrelated skills.
+- **From v2.1.x:** nothing else is required. Ledger schema stays 3.
+- **From v2.0:** run `upgrade --actor PLATFORM:SESSION` once. The migration is
+  atomic and preserves tasks, notices, lessons and receipts. Old actors reject
+  schema 3 rather than bypass its gates. Existing approvals still need fresh
+  integration evidence before `finish`.
+- **From v1:** preserve `.agents/{STATE,TASKS,HANDOFF,REVIEW,DECISIONS,FLAGS}.md`
+  and read open tasks and flags before accepting new claims. Translate active
+  tasks into claims, open flags into notices, and decisions into PROJECT.md or
+  proposed lessons, recording the source file and commit for each. Never carry a
+  v1 audit forward as approval of an unverified head. Resolve inherited references
+  to `gridmatrix-adopt`, `-audit`, `-handoff`, `-retro` and `-session-start`
+  explicitly; the single `gridmatrix` skill now contains all five procedures. Mark
+  legacy files historical and remove old project skill copies only once confirmed
+  Gridmatrix-owned. A personal v1 skill may need disabling in its platform UI.
 
-## Upgrading v2.0 to v2.1
-
-Stop both writers and update both installed project copies with init. Configuration
-and new ledgers use schema 3; old actors reject schema 3 rather than bypass new
-gates. Run `upgrade --actor PLATFORM:SESSION` once to migrate the existing ledger
-without losing tasks, notices, lessons or receipts. The migration is atomic.
-Existing approvals still require fresh integration evidence before finish.
-Commit the updated project files so all clones receive the same runtime.
+Use a new request ID for a new submission. Reusing an identical old ID replays the
+recorded request instead of starting a new lifecycle step.
 
 Recovery, bounded execution and optional integrations are documented in
-[execution.md](execution.md). Use explicit operator recovery instead of assuming
-a lost actor's identity. A GitHub connector alone does not provide a local Git
-transport; both execution environments need access to the configured coordinator.
-No skill grants credentials or installs the peer CLI automatically.
-
-## Updating v2.1.0 to v2.1.1
-
-Update both project copies using init from the updated installed or repository skill,
-then commit the reviewed changes. Ledger schema remains 3; no state migration is
-needed. Quiesce peer runs while updating. Existing orphan runs remain recoverable.
-Use a new request ID for a new submission; reusing an identical old ID replays the
-old request and does not start a new lifecycle step.
+[execution.md](execution.md). Use explicit operator recovery instead of assuming a
+lost actor's identity. A GitHub connector alone is not a local Git transport; both
+environments need access to the configured coordinator. No skill grants credentials
+or installs a peer CLI automatically.
