@@ -12,7 +12,8 @@ Plug and play means the NEXT project to adopt Gridmatrix must not repeat the rep
 done here. It does not mean convenience: on 2026-09-08, upstream `main` (1773a73) was
 reproduced silently bricking a fresh Windows project. `init` exited 0, `check` failed with
 a confusing message, the first `claim` reported `"status": "recorded"`, and the tree entry
-was stored as `ledger.json`. Every later read and write then failed with "coordination
+was stored as `ledger.json
+`. Every later read and write then failed with "coordination
 ref exists but is not a Gridmatrix ledger; do not overwrite it", which instructs the user
 not to repair it. One operation, then a dead ledger with no in-tool recovery.
 
@@ -22,11 +23,14 @@ methodology.
 
 ## Constraints that actually shaped decisions
 
-- **No Claude CLI and no Codex CLI exist in either platform's environment.** `doctor`
-  reports `live_pair_ready: false`, `readiness: missing-cli`, both platforms
-  `installed: false`. No peer adapter, `exec` or `app-server`, has ever executed. All peer
-  dispatch, review-evidence and App Server behaviour is verified by unit tests and code
-  reading only. `claude plugin validate --strict` has never run against the manifests.
+- **No peer adapter has ever been exercised as a live Gridmatrix peer run.** State this
+  precisely, because a looser version of it was wrong: a real `codex` executable *does*
+  exist on the maintainer machine (`~/.codex/.sandbox-bin/codex.exe`), and a Codex test
+  run selected it. It is simply not on `PATH` in the Claude Code shell, where `doctor`
+  reports `live_pair_ready: false`, `readiness: missing-cli`. Presence is not
+  authentication and not a validated peer run. Peer dispatch, review-evidence and App
+  Server behaviour remain verified by unit tests and code reading only, and
+  `claude plugin validate --strict` has never run against the manifests.
 - **The account is Claude Pro; budget is a real limit.** On 2026-09-08 a 52-agent audit
   workflow consumed 1.46M subagent tokens, hit the spend limit mid-run, and returned zero
   findings because 50 of 52 agents died. The same audit was then completed inline with
