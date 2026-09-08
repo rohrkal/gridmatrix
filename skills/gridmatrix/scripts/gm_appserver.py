@@ -41,9 +41,9 @@ def execute(binary, cwd, folder, prompt, schema, timeout, env, model=None, resum
             enqueue(None)
 
     try:
-        with (folder / 'stderr.log').open('w') as err:
+        with (folder / 'stderr.log').open('w', encoding='utf-8') as err:
             child = subprocess.Popen([binary, 'app-server'], cwd=cwd, env=env, stdin=subprocess.PIPE,
-                                     stdout=subprocess.PIPE, stderr=err, text=True, errors='replace',
+                                     stdout=subprocess.PIPE, stderr=err, text=True, encoding='utf-8', errors='replace',
                                      **({'start_new_session': True} if os.name == 'posix' else {}))
             reader_thread = threading.Thread(target=reader, args=(child.stdout,), daemon=True)
             reader_thread.start()
@@ -124,7 +124,7 @@ def execute(binary, cwd, folder, prompt, schema, timeout, env, model=None, resum
         (folder / 'stdout.log').write_text(scrub(''.join(logs)), encoding='utf-8')
         err = folder / 'stderr.log'
         if err.exists():
-            with err.open(errors='replace') as stream:
+            with err.open(encoding='utf-8', errors='replace') as stream:
                 tail = stream.read(4 * 1024 * 1024)
             err.write_text(scrub(tail), encoding='utf-8')
     return {'status': status, 'exit_code': child.returncode if child is not None else None,

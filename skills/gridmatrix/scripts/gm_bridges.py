@@ -11,7 +11,7 @@ def invoke(root, args, payload, g):
     script = Path(__file__).with_name('gridmatrix.py')
     p = subprocess.run([sys.executable, str(script), '--repo', str(root), *args],
                        input=json.dumps(payload) if payload is not None else None,
-                       capture_output=True, text=True, timeout=180)
+                       capture_output=True, text=True, encoding='utf-8', timeout=180)
     g.require(p.returncode == 0, p.stderr.strip() or 'Gridmatrix request failed')
     return json.loads(p.stdout)
 
@@ -20,7 +20,7 @@ def hooks(root, install, g):
     if install:
         g.require(os.name == 'posix', 'automatic hook installation supports POSIX shells; configure the documented command manually on Windows')
         path = root / '.claude/settings.json'; g.safe_target(root, path)
-        settings = json.loads(path.read_text()) if path.exists() else {}
+        settings = json.loads(path.read_text(encoding='utf-8')) if path.exists() else {}
         script = root / '.agents/skills/gridmatrix/scripts/gridmatrix.py'
         # Relative to the discovered project root: portable to another checkout.
         command = 'python3' + ' "$CLAUDE_PROJECT_DIR/.agents/skills/gridmatrix/scripts/gridmatrix.py" --repo "$CLAUDE_PROJECT_DIR" hook'

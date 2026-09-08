@@ -94,7 +94,7 @@ def run_process(argv, cwd, directory, timeout=300, env=None, stdin=None, cap=4 *
             'seconds': round(time.monotonic() - started, 3),
             'stdout_sha256': hashlib.sha256(out.read_bytes()).hexdigest(),
             'stderr_sha256': hashlib.sha256(err.read_bytes()).hexdigest(),
-            'stdout_tail': out.read_text()[-2000:], 'stderr_tail': err.read_text()[-2000:]}
+            'stdout_tail': out.read_text(encoding='utf-8')[-2000:], 'stderr_tail': err.read_text(encoding='utf-8')[-2000:]}
 
 
 def cli_capability(binary):
@@ -104,7 +104,7 @@ def cli_capability(binary):
         return result
     for arg, key in [(['--version'], 'version'), (['exec', '--help'] if binary == 'codex' else ['--help'], 'help')]:
         try:
-            p = subprocess.run([found, *arg], capture_output=True, text=True, timeout=10)
+            p = subprocess.run([found, *arg], capture_output=True, text=True, encoding='utf-8', timeout=10)
             text = p.stdout + p.stderr
             if key == 'version':
                 result['version'] = scrub(text.strip())[:200] if p.returncode == 0 else 'unavailable'
@@ -231,7 +231,7 @@ def capture(root, ledger, task, who, rid, report, g, op='capture'):
 
 
 def commands_from(path, g):
-    commands = json.loads(Path(path).read_text())
+    commands = json.loads(Path(path).read_text(encoding='utf-8'))
     g.require(isinstance(commands, list) and commands and all(isinstance(c, list) and c and
               all(isinstance(x, str) and x for x in c) for c in commands), 'commands file must be a nonempty array of argv arrays')
     return commands
@@ -369,7 +369,7 @@ def peer(root, args, g):
         g.require(not g.blockers(state, args.task), 'resolve blockers before dispatch')
     pending = runtime_root(root, g) / rid / 'completion.json'
     if pending.is_file():
-        request = json.loads(pending.read_text())
+        request = json.loads(pending.read_text(encoding='utf-8'))
         g.require(request.get('report', {}).get('plan_sha256') == plan, 'pending run inputs differ')
         ctx = g.context_at(root); ctx['runtime_record'] = True
         # The completed reviewer used a separate worktree, which may already be removed.
@@ -429,7 +429,7 @@ def peer(root, args, g):
             g.require(g.context_at(worktree)['head'] == head and not g.git(worktree, 'status', '--porcelain').stdout,
                       'peer changed source; review invalid and worktree preserved')
             if args.to == 'claude-code':
-                envelope = json.loads((folder / 'stdout.log').read_text())
+                envelope = json.loads((folder / 'stdout.log').read_text(encoding='utf-8'))
                 g.require(not envelope.get('is_error') and envelope.get('subtype') == 'success', 'Claude returned an unsuccessful result')
                 value = envelope.get('structured_output')
                 report['session_id'] = envelope.get('session_id')
@@ -437,7 +437,7 @@ def peer(root, args, g):
             else:
                 result_path = folder / 'result.json'
                 g.require(result_path.is_file() and result_path.stat().st_size <= 1024 * 1024, 'missing/oversized Codex result')
-                value = json.loads(result_path.read_text())
+                value = json.loads(result_path.read_text(encoding='utf-8'))
             value = validate_review(value, g)
             value = {k: ([{fk: scrub(fv) for fk, fv in f.items()} for f in v] if k == 'findings' else scrub(v)) for k, v in value.items()}
             report.update(passed=True, acknowledged=True, result=value)

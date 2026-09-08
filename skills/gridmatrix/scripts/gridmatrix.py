@@ -44,9 +44,15 @@ def dumps(value):
 
 def git(root, *args, data=None, check=True):
     try:
-        p = subprocess.run(['git', '-C', str(root), *args], input=data,
-                           text=True, capture_output=True, timeout=45,
+        # Byte-mode stdin: text mode rewrites LF to CRLF on Windows, which would
+        # corrupt mktree entry names and any other newline-delimited Git input.
+        p = subprocess.run(['git', '-C', str(root), *args],
+                           input=None if data is None else data.encode('utf-8'),
+                           capture_output=True, timeout=45,
                            env=dict(os.environ, GIT_TERMINAL_PROMPT='0'))
+        p = subprocess.CompletedProcess(p.args, p.returncode,
+                                        p.stdout.decode('utf-8', 'replace'),
+                                        p.stderr.decode('utf-8', 'replace'))
     except subprocess.TimeoutExpired:
         raise Error('Git operation timed out; verify delivery by request ID before retrying') from None
     if check and p.returncode:
@@ -346,7 +352,7 @@ def transition(state, r, context):
 class Ledger:
     def __init__(self, root):
         self.root = root
-        self.config = json.loads((root / '.gridmatrix/config.json').read_text())
+        self.config = json.loads((root / '.gridmatrix/config.json').read_text(encoding='utf-8'))
         require(self.config.get('schema') in (2, 3), 'unsupported config schema')
         self.remote = self.config.get('remote')
         self.ref = 'refs/heads/' + self.config['branch'] if self.remote else 'refs/gridmatrix/state'
@@ -433,7 +439,7 @@ def install(root, remote, dry):
     source = Path(__file__).resolve().parents[1]
     configpath = root / '.gridmatrix/config.json'
     safe_target(root, configpath)
-    existing = json.loads(configpath.read_text()) if configpath.exists() else None
+    existing = json.loads(configpath.read_text(encoding='utf-8')) if configpath.exists() else None
     if existing:
         require(existing.get('schema') in (2, 3), 'unsupported existing config; migration required')
         require(remote is None or remote == existing.get('remote'), 'transport change requires explicit ledger migration')
@@ -445,7 +451,7 @@ def install(root, remote, dry):
     files = {configpath: dumps(config)}
     for name in ('AGENTS.md', 'CLAUDE.md'):
         p = root / name; safe_target(root, p)
-        old = p.read_text() if p.exists() else ''
+        old = p.read_text(encoding='utf-8') if p.exists() else ''
         if name == 'AGENTS.md':
             files[p] = managed(old)
         else:
@@ -456,12 +462,12 @@ def install(root, remote, dry):
     for dest in (root / '.agents/skills/gridmatrix', root / '.claude/skills/gridmatrix'):
         for src in source.rglob('*'):
             if src.is_file() and '__pycache__' not in src.parts and src.suffix != '.pyc':
-                files[dest / src.relative_to(source)] = src.read_text()
+                files[dest / src.relative_to(source)] = src.read_text(encoding='utf-8')
     # Preflight every target before any write, including partially installed projects.
     for p in files:
         safe_target(root, p)
     for p, text in files.items():
-        if p.exists() and p.read_text() == text:
+        if p.exists() and p.read_text(encoding='utf-8') == text:
             continue
         print(('would write ' if dry else 'write ') + str(p.relative_to(root)))
         if not dry:
@@ -505,7 +511,7 @@ def main(argv=None):
     ledger = Ledger(root)
     ctx = context_at(root)
     if args.command == 'apply':
-        r = json.load(sys.stdin) if args.file == '-' else json.loads(Path(args.file).read_text())
+        r = json.load(sys.stdin) if args.file == '-' else json.loads(Path(args.file).read_text(encoding='utf-8'))
         ctx['recovery_authorized'] = args.authorize_recovery
         gm_runtime.preflight(root, ledger, r, ctx, globals())
         if r.get('op') == 'claim':
@@ -545,9 +551,9 @@ def main(argv=None):
     else:
         for name in ('AGENTS.md', 'CLAUDE.md', '.gridmatrix/PROJECT.md'):
             require((root / name).is_file(), 'missing ' + name)
-        ag = (root / 'AGENTS.md').read_text()
+        ag = (root / 'AGENTS.md').read_text(encoding='utf-8')
         require(ag.count(BEGIN) == ag.count(END) == 1 and ag.index(BEGIN) < ag.index(END), 'invalid managed block')
-        require('@AGENTS.md' in (root / 'CLAUDE.md').read_text().splitlines(), 'missing Claude import')
+        require('@AGENTS.md' in (root / 'CLAUDE.md').read_text(encoding='utf-8').splitlines(), 'missing Claude import')
         first = root / '.agents/skills/gridmatrix'; second = root / '.claude/skills/gridmatrix'
         expected = {str(x.relative_to(first)) for x in first.rglob('*') if x.is_file() and '__pycache__' not in x.parts}
         actual = {str(x.relative_to(second)) for x in second.rglob('*') if x.is_file() and '__pycache__' not in x.parts}
