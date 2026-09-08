@@ -79,6 +79,9 @@ attest model identity. Keep platform permissions and project protections.
 
 ## Maintain and verify
 
+For changes to Gridmatrix itself, use the [maintainer workflow](docs/skill-development.md)
+to coordinate canonical source edits, generated skill copies, and independent review.
+
 ```sh
 # Preview an install/update without writing
 python3 gridmatrix.py --repo /path/to/project init --dry-run
