@@ -209,6 +209,7 @@ class RuntimeTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(self.state()['tasks']['T1']['status'], 'review')
             self.assertFalse(self.state()['runs'][rid]['passed'])
+        self.assertFalse((self.root / '.git/gridmatrix-runtime/timed/worktree').exists())
         self.assertIn('budget', self.peer('fourth').stderr)
 
     def test_peer_requires_inspection_and_actionable_changes(self):
