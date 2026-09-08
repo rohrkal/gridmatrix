@@ -115,9 +115,9 @@ class RuntimeTests(unittest.TestCase):
         self.head = run(self.root, 'rev-parse', 'HEAD')
         return new_base
 
-    def refresh_base(self, rid, base, actor='codex:a', ok=True):
+    def refresh_base(self, rid, base, actor='codex:a', ok=True, target='refs/heads/main'):
         return self.apply(dict(id=rid, op='refresh-base', actor=actor, task='T1',
-                               base=base, target='refs/heads/main',
+                               base=base, target=target,
                                evidence='Task moved onto the current integration target'), ok=ok)
 
     def test_refresh_base_preserves_provenance_and_allows_submit(self):
@@ -132,6 +132,17 @@ class RuntimeTests(unittest.TestCase):
             'evidence': 'Task moved onto the current integration target'}])
         self.submit()
         self.assertEqual(self.state()['tasks']['T1']['status'], 'review')
+
+    def test_refresh_base_accepts_explicit_remote_target(self):
+        new_base = self.move_task_onto_new_base()
+        remote = self.base / 'remote.git'; remote.mkdir()
+        run(remote, 'init', '--bare')
+        run(self.root, 'remote', 'add', 'origin', str(remote))
+        run(self.root, 'push', 'origin', 'main')
+        self.refresh_base('remote-refresh', new_base, target='refs/remotes/origin/main')
+        refresh = self.state()['tasks']['T1']['base_refreshes'][0]
+        self.assertEqual(refresh['target'], 'refs/remotes/origin/main')
+        self.assertEqual(refresh['target_head'], new_base)
 
     def test_refresh_base_rejects_wrong_owner_target_and_scope(self):
         new_base = self.move_task_onto_new_base()
