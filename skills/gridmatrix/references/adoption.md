@@ -1,26 +1,25 @@
 # Adoption and migration
 
-Prerequisites: Python 3.9+ and Git (2.38+ for integration checks). The core uses
-portable Python/Git; Windows-specific behavior remains unvalidated. Strict hook
-auto-install requires POSIX. Use `python` instead of `python3` where appropriate. This installer is
-project-local; it never changes global agent settings or installs launch hooks.
+Prerequisites: Python 3.9+ and Git (2.38+ for integration checks). The suite now
+runs on Windows as well as POSIX, though strict hook auto-install remains POSIX-only.
+On Windows use `python`, since `python3` is often a Store alias stub that exits
+without running. The installer is project-local and never changes global agent
+settings or installs launch hooks.
 
 ## New or inherited project
 
-- Existing Git repository: inspect root, branches, status, instruction files,
-  project manifests and prior coordination state. Work from a clean dedicated
-  checkout if another session owns the current directory.
-- Starting from zero: create the requested project directory and `git init` if
-  authorized by the task. No commit is needed for installation. Before claiming a
-  coding task, commit the reviewed scaffold/config explicitly; never stage broadly
-  in an inherited dirty project.
-- Claude-only or Codex-only history: preserve all existing instruction text.
-  Record shared project facts in `.gridmatrix/PROJECT.md` with their provenance so
-  both platforms can read them. A file's platform name does not decide which
-  conflicting rule wins. User intent and applicable instruction precedence do.
-- Both histories: compare objectives, architecture decisions, known failures,
-  active branches and uncommitted changes. Resolve material contradictions from
-  evidence; ask only when the user's intent genuinely cannot be determined.
+- **Existing repository:** inspect root, branches, status, instruction files,
+  manifests and prior coordination state. Work from a clean dedicated checkout if
+  another session owns the current directory.
+- **From zero:** create the directory and `git init` if the task authorizes it.
+  Installation needs no commit, but commit the reviewed scaffold before claiming a
+  coding task; never stage broadly in an inherited dirty project.
+- **Single-platform history:** preserve existing instruction text and record shared
+  facts in `.gridmatrix/PROJECT.md` with provenance. A file's platform name does not
+  decide which conflicting rule wins; user intent and precedence do.
+- **Both histories:** compare objectives, decisions, known failures, active branches
+  and uncommitted changes. Resolve contradictions from evidence; ask only when the
+  user's intent genuinely cannot be determined.
 
 Run the script from this skill directory (an absolute path avoids cwd ambiguity):
 
@@ -42,30 +41,30 @@ Its ledger is stored in `refs/gridmatrix/state`, shared through Git's common dir
 It is not synchronized by ordinary pushes and is not a backup. Independent clones
 in local mode are separate coordinators: never use them for concurrent work.
 
-`init` preserves existing transport on reruns, refuses implicit transport changes,
-adds only a marked `AGENTS.md` block and exact `@AGENTS.md` import in `CLAUDE.md`,
-and installs the complete skill under `.agents/skills/gridmatrix` and
-`.claude/skills/gridmatrix`. It is idempotent, preflights paths/markers and refuses
-symlink destinations. Its managed skill files are replaced on update; maintain
-project customizations outside those files. Rerun from an updated upstream skill
-copy to update both project copies. Old extra custom files are not removed;
-`check` catches divergence between copies and differences from the running skill
-for its instructions, references and runtime files. Use the intended updated
-upstream script when checking freshness; an old script cannot discover a newer
-release by itself.
+`init` is idempotent: it preserves existing transport, refuses implicit transport
+changes, adds only a marked `AGENTS.md` block and the `@AGENTS.md` import in
+`CLAUDE.md`, installs the skill under `.agents/skills/gridmatrix` and
+`.claude/skills/gridmatrix`, preflights paths and markers, and refuses symlink
+destinations. Managed skill files are replaced on update, so keep project
+customizations outside them; extra custom files are never removed. `check` catches
+divergence between copies and from the running skill, so check freshness with the
+intended updated script - an old one cannot discover a newer release.
 
-Fill PROJECT.md from the current request, manifests, lockfiles and code. Inspect
-scripts before executing them. Record applicable commands and actual results,
+Fill PROJECT.md from the request, manifests, lockfiles and code, inspecting scripts
+before executing them. Record applicable commands and their actual results,
 including unavailable commands and pre-existing failures. Multiple lockfiles may
-represent separate subprojects, not necessarily an erroneous README. Do not run
-installation, deployment, migrations, or a costly suite automatically without
-considering existing authorization and project requirements.
+mean separate subprojects rather than a wrong README. Never run installation,
+deployment, migrations or a costly suite automatically without considering existing
+authorization and project requirements.
 
-Run `check` for structural validation. It does not certify adoption facts or run
-the project's tests. Verify each agent actually discovers this skill: invoke
-`$gridmatrix` in Codex or `/gridmatrix` in Claude Code. Higher-precedence personal
-skills or `AGENTS.override.md` may shadow project instructions; diagnose and tell
-the user instead of silently changing global configuration.
+Run `check` for structural validation; it certifies neither adoption facts nor the
+project's tests. Verify discovery by invoking `$gridmatrix` in Codex or
+`/gridmatrix` in Claude Code. Installing the skill for Claude Code takes two
+commands, `/plugin marketplace add OWNER/REPO` then
+`/plugin install gridmatrix@gridmatrix`, because adding a marketplace does not also
+install its plugin. Personal skills or `AGENTS.override.md` can shadow project
+instructions; diagnose and tell the user rather than silently changing global
+configuration.
 
 ## Upgrading an existing installation
 
@@ -90,8 +89,7 @@ updated skill so both project copies match, and commit the reviewed result.
 Use a new request ID for a new submission. Reusing an identical old ID replays the
 recorded request instead of starting a new lifecycle step.
 
-Recovery, bounded execution and optional integrations are documented in
-[execution.md](execution.md). Use explicit operator recovery instead of assuming a
-lost actor's identity. A GitHub connector alone is not a local Git transport; both
-environments need access to the configured coordinator. No skill grants credentials
-or installs a peer CLI automatically.
+[execution.md](execution.md) covers recovery, bounded execution and optional
+integrations. Use explicit operator recovery rather than assuming a lost actor's
+identity. A GitHub connector is not a local Git transport, both environments need
+the configured coordinator, and no skill grants credentials or installs a peer CLI.
