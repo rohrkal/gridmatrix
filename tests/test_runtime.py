@@ -144,6 +144,9 @@ class RuntimeTests(unittest.TestCase):
 
     def test_next_filters_to_actionable_actor_work(self):
         self.assertEqual(json.loads(cli(self.root, 'next', '--actor', 'codex:a').stdout)['items'], [])
+        cold = json.loads(cli(self.root, 'next', '--actor', 'codex:new-session').stdout)['items']
+        self.assertEqual(cold[0]['action'], 'inspect-owner-or-authorized-recovery')
+        self.assertEqual(cold[0]['owner'], 'codex:a')
         self.submit()
         reviewer = json.loads(cli(self.root, 'next', '--actor', 'claude-code:b').stdout)['items']
         self.assertEqual([(item['task'], item['action']) for item in reviewer], [('T1', 'review-exact-head')])
@@ -186,6 +189,14 @@ class RuntimeTests(unittest.TestCase):
             'watch-integration', '--target', 'refs/heads/main', '--commands', str(self.commands))
         before = json.loads(cli(self.root, 'next', '--actor', 'codex:a').stdout)['items']
         self.assertEqual(before[0]['action'], 'advance-integration-target', repr(before))
+        target = run(self.root, 'rev-parse', 'refs/heads/main')
+        target_tree = run(self.root, 'rev-parse', 'refs/heads/main^{tree}')
+        drift = gm.git(self.root, 'commit-tree', target_tree, '-p', target,
+                       data='unrelated target drift\n').stdout.strip()
+        run(self.root, 'update-ref', 'refs/heads/main', drift, target)
+        drifted = json.loads(cli(self.root, 'next', '--actor', 'codex:a').stdout)['items']
+        self.assertEqual(drifted[0]['action'], 'rerun-integration-candidate', repr(drifted))
+        run(self.root, 'update-ref', 'refs/heads/main', target, drift)
         process = subprocess.Popen(
             [sys.executable, str(SCRIPT), '--repo', str(self.root), 'watch', '--actor',
              'codex:a', '--timeout', '5', '--poll', '0.1'],

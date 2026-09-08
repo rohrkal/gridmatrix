@@ -391,6 +391,7 @@ class Ledger:
     def repair_legacy_cr_name(self, who):
         """Repair only the historical Windows ``ledger.json\r`` tree defect."""
         actor(who)
+        tempref = None
         if not self.remote:
             p = git(self.root, 'rev-parse', '--verify', self.ref, check=False)
             head = p.stdout.strip() if not p.returncode else None
@@ -400,42 +401,46 @@ class Ledger:
             head = p.stdout.split()[0] if p.returncode == 0 else None
             if head:
                 tempref = 'refs/gridmatrix/repair/' + uuid.uuid4().hex
-                try:
-                    git(self.root, 'fetch', '--no-tags', '--no-write-fetch-head', self.remote,
-                        self.ref + ':' + tempref)
-                    fetched = git(self.root, 'rev-parse', tempref).stdout.strip()
-                    require(fetched == head, 'coordination ref changed during repair; retry from fresh state')
-                finally:
+                git(self.root, 'fetch', '--no-tags', '--no-write-fetch-head', self.remote,
+                    self.ref + ':' + tempref)
+                fetched = git(self.root, 'rev-parse', tempref).stdout.strip()
+                if fetched != head:
                     git(self.root, 'update-ref', '-d', tempref, check=False)
+                    tempref = None
+                    require(False, 'coordination ref changed during repair; retry from fresh state')
         require(head, 'coordination ref does not exist; nothing to repair')
-        healthy = git(self.root, 'show', head + ':ledger.json', check=False)
-        if healthy.returncode == 0:
-            state = json.loads(healthy.stdout)
-            self._validate_state_shape(state)
-            return {'status': 'already-healthy', 'commit': head, 'ref': self.ref,
-                    'transport': self.remote or 'local-only'}
+        try:
+            healthy = git(self.root, 'show', head + ':ledger.json', check=False)
+            if healthy.returncode == 0:
+                state = json.loads(healthy.stdout)
+                self._validate_state_shape(state)
+                return {'status': 'already-healthy', 'commit': head, 'ref': self.ref,
+                        'transport': self.remote or 'local-only'}
 
-        listing = git(self.root, 'ls-tree', '-z', head).stdout.split('\0')
-        entries = [entry for entry in listing if entry]
-        require(len(entries) == 1, 'repair refused: coordination tree is not the exact legacy one-entry shape')
-        match = re.fullmatch(r'100644 blob ([0-9a-f]{40,64})\tledger\.json\r', entries[0])
-        require(match, 'repair refused: expected the exact legacy ledger.json carriage-return entry')
-        blob = match.group(1)
-        raw = git(self.root, 'cat-file', 'blob', blob).stdout
-        state = json.loads(raw)
-        self._validate_state_shape(state)
-        tree = git(self.root, 'mktree', data=f'100644 blob {blob}\tledger.json\n').stdout.strip()
-        commit = git(self.root, '-c', 'user.name=Gridmatrix', '-c', 'user.email=gridmatrix@localhost',
-                     'commit-tree', tree, '-p', head,
-                     data=f'gridmatrix: repair legacy ledger filename ({who})\n').stdout.strip()
-        if self.remote:
-            result = git(self.root, 'push', '--porcelain', self.remote, commit + ':' + self.ref, check=False)
-        else:
-            result = git(self.root, 'update-ref', self.ref, commit, head, check=False)
-        require(result.returncode == 0,
-                'coordination ref changed during repair; no force was used, retry from fresh state')
-        return {'status': 'repaired', 'previous': head, 'commit': commit, 'ref': self.ref,
-                'transport': self.remote or 'local-only'}
+            listing = git(self.root, 'ls-tree', '-z', head).stdout.split('\0')
+            entries = [entry for entry in listing if entry]
+            require(len(entries) == 1, 'repair refused: coordination tree is not the exact legacy one-entry shape')
+            match = re.fullmatch(r'100644 blob ([0-9a-f]{40,64})\tledger\.json\r', entries[0])
+            require(match, 'repair refused: expected the exact legacy ledger.json carriage-return entry')
+            blob = match.group(1)
+            raw = git(self.root, 'cat-file', 'blob', blob).stdout
+            state = json.loads(raw)
+            self._validate_state_shape(state)
+            tree = git(self.root, 'mktree', data=f'100644 blob {blob}\tledger.json\n').stdout.strip()
+            commit = git(self.root, '-c', 'user.name=Gridmatrix', '-c', 'user.email=gridmatrix@localhost',
+                         'commit-tree', tree, '-p', head,
+                         data=f'gridmatrix: repair legacy ledger filename ({who})\n').stdout.strip()
+            if self.remote:
+                result = git(self.root, 'push', '--porcelain', self.remote, commit + ':' + self.ref, check=False)
+            else:
+                result = git(self.root, 'update-ref', self.ref, commit, head, check=False)
+            require(result.returncode == 0,
+                    'coordination ref changed during repair; no force was used, retry from fresh state')
+            return {'status': 'repaired', 'previous': head, 'commit': commit, 'ref': self.ref,
+                    'transport': self.remote or 'local-only'}
+        finally:
+            if tempref:
+                git(self.root, 'update-ref', '-d', tempref, check=False)
 
     @staticmethod
     def _validate_state_shape(state):

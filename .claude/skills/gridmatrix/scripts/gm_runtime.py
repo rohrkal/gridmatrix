@@ -364,6 +364,13 @@ def actionable(root, state, who, g):
                           'task': tid, 'head': task.get('head'), 'action': 'review-exact-head',
                           'scope': task.get('scope', [])})
             continue
+        if (task.get('builder_platform') == platform_name and task.get('owner') != who
+                and status in ('building', 'review', 'approved')):
+            items.append({'key': 'recover:' + tid + ':' + str(task.get('owner')), 'kind': 'task',
+                          'task': tid, 'head': task.get('head'), 'owner': task.get('owner'),
+                          'status': status, 'action': 'inspect-owner-or-authorized-recovery',
+                          'scope': task.get('scope', [])})
+            continue
         if task.get('owner') != who:
             continue
         if status == 'building' and (task.get('review') or {}).get('verdict') == 'changes':
@@ -387,6 +394,8 @@ def actionable(root, state, who, g):
                         action = 'finish-integrated-task'; detail['integrated_commit'] = current
                     elif task_on_target and task_tree == record['tree']:
                         action = 'finish-integrated-task'; detail['integrated_commit'] = task['head']
+                    elif current != record.get('target_sha'):
+                        action = 'rerun-integration-candidate'
                     detail.update(target_ref=record['target_ref'], target_head=current)
                 except (g.Error, OSError, ValueError) as exc:
                     action = 'inspect-integration-target'
