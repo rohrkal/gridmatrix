@@ -2,6 +2,7 @@ import concurrent.futures
 import importlib.util
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -282,8 +283,8 @@ class PortabilityTests(unittest.TestCase):
     """
 
     def setUp(self):
-        self.base = Path(tempfile.mkdtemp())
-        self.addCleanup(lambda: None)
+        self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
+        self.base = Path(self.temp.name)
         self.root = repo(self.base / 'project')
 
     def test_ledger_blob_is_named_ledger_json_exactly(self):
@@ -331,15 +332,22 @@ class PortabilityTests(unittest.TestCase):
         self.assertGreater(checked, 0)
 
     def test_install_copies_non_utf8_asset_without_corruption(self):
-        # rglob copies every file, so one binary asset must not break init.
+        # rglob copies every file, so one binary asset must not break init. Probe a
+        # throwaway copy of the skill: writing into the canonical source would mutate
+        # the tree under review and could clobber a real asset if this test died.
         source = SCRIPT.resolve().parents[1]
-        asset = source / 'assets' / 'portability_probe.bin'
+        skill = self.base / 'probe-skill'
+        shutil.copytree(source, skill, ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
         blob = bytes([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) + bytes(range(256))
-        asset.write_bytes(blob)
-        self.addCleanup(asset.unlink)
-        cli(self.root, 'init')
+        (skill / 'assets' / 'portability_probe.bin').write_bytes(blob)
+        p = subprocess.run([sys.executable, str(skill / 'scripts' / 'gridmatrix.py'),
+                            '--repo', str(self.root), 'init'],
+                           text=True, encoding='utf-8', capture_output=True)
+        self.assertEqual(p.returncode, 0, p.stderr)
         for dest in ('.agents/skills/gridmatrix', '.claude/skills/gridmatrix'):
             self.assertEqual((self.root / dest / 'assets' / 'portability_probe.bin').read_bytes(), blob)
+        self.assertFalse((source / 'assets' / 'portability_probe.bin').exists(),
+                         'test must not write into the canonical skill source')
 
 if __name__ == '__main__':
     unittest.main()
