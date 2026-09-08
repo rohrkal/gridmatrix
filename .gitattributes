@@ -1,0 +1,8 @@
+# Gridmatrix byte-compares installed skill copies; CRLF checkout breaks `check`.
+.agents/skills/gridmatrix/** text eol=lf
+.claude/skills/gridmatrix/** text eol=lf
+skills/gridmatrix/** text eol=lf
+.gridmatrix/** text eol=lf
+AGENTS.md text eol=lf
+CLAUDE.md text eol=lf
+*.py text eol=lf

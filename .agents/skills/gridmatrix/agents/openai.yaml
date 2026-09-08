@@ -1,0 +1,13 @@
+interface:
+  display_name: Gridmatrix
+  short_description: Coordinate Claude Code and Codex across projects
+  default_prompt: Use $gridmatrix to coordinate Claude Code and Codex on this project.
+  icon_small: assets/icon.svg
+  icon_large: assets/icon.svg
+policy:
+  products:
+  - chatgpt
+  - codex
+  - api
+  - atlas
+  allow_implicit_invocation: true
