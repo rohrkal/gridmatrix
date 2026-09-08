@@ -14,7 +14,7 @@ import tempfile
 import uuid
 from datetime import datetime, timezone
 
-VERSION = '2.1.1'
+VERSION = '2.2.0'
 PLATFORMS = {'codex', 'claude-code'}
 BEGIN, END = '<!-- gridmatrix:begin -->', '<!-- gridmatrix:end -->'
 BLOCK = f'''{BEGIN}
@@ -200,6 +200,24 @@ def transition(state, r, context):
                           'depends_on': dependencies, 'contracts': contracts, 'integration': None,
                           'task_class': r.get('task_class', 'unspecified'), 'model': r.get('model', 'unknown'),
                           'review_rounds': 0}
+    elif op == 'refresh-base':
+        tid = required(r, 'task'); require(tid in s['tasks'], 'unknown task')
+        t = s['tasks'][tid]
+        require(who == t['owner'], 'only the task owner can refresh its base')
+        require(t['status'] == 'building' and t.get('head') is None and
+                t.get('review') is None and t.get('integration') is None,
+                'refresh base only while the task is unsubmitted and building')
+        require(context['workspace'] == t['workspace'] and context['branch'] == t['branch'],
+                'refresh base from the claimed worktree and branch')
+        base = required(r, 'base'); target = required(r, 'target')
+        require(context.get('refresh_previous_base') == t['base'] and
+                context.get('refresh_base') == base and context.get('refresh_target') == target and
+                context.get('refresh_scope_verified'), 'refresh base requires validated Git ancestry and scope')
+        require(base != t['base'], 'task already uses this base')
+        t.setdefault('base_refreshes', []).append({
+            'from': t['base'], 'to': base, 'target': target,
+            'target_head': context['refresh_target_head'], 'evidence': required(r, 'evidence')})
+        t['base'] = base
     elif op in ('submit', 'review', 'finish', 'cancel', 'transfer'):
         tid = required(r, 'task'); require(tid in s['tasks'], 'unknown task')
         t = s['tasks'][tid]
@@ -609,8 +627,37 @@ def main(argv=None):
             require(resolved == r['base'], 'base must be a full commit SHA')
             require(git(root, 'merge-base', '--is-ancestor', resolved, 'HEAD', check=False).returncode == 0,
                     'base must be an ancestor of task HEAD')
-        if r.get('op') in ('submit', 'review', 'finish', 'transfer', 'recover'):
+        if r.get('op') in ('submit', 'review', 'finish', 'transfer', 'recover', 'refresh-base'):
             require(not git(root, 'status', '--porcelain').stdout, 'commit/preserve changes before review operations')
+        if r.get('op') == 'refresh-base':
+            _, current = ledger.load()
+            task = current['tasks'].get(r.get('task')); require(task, 'unknown task')
+            require(task['owner'] == r.get('actor'), 'only the task owner can refresh its base')
+            require(task['status'] == 'building' and task.get('head') is None and
+                    task.get('review') is None and task.get('integration') is None,
+                    'refresh base only while the task is unsubmitted and building')
+            require(ctx['workspace'] == task['workspace'] and ctx['branch'] == task['branch'],
+                    'refresh base from the claimed worktree and branch')
+            base = required(r, 'base')
+            resolved = git(root, 'rev-parse', '--verify', base + '^{commit}').stdout.strip()
+            require(resolved == base, 'base must be a full commit SHA')
+            require(git(root, 'merge-base', '--is-ancestor', task['base'], base,
+                        check=False).returncode == 0,
+                    'new base must descend from the previous base')
+            require(git(root, 'merge-base', '--is-ancestor', base, 'HEAD',
+                        check=False).returncode == 0,
+                    'new base must be an ancestor of task HEAD')
+            target = required(r, 'target')
+            target_head = gm_runtime.target_head(root, target, gm_runtime.api(globals()))
+            require(git(root, 'merge-base', '--is-ancestor', base, target_head,
+                        check=False).returncode == 0,
+                    'new base is not present on the named integration target')
+            changed = git(root, 'diff', '--name-only', '-z', '--no-renames', base, 'HEAD').stdout.split('\0')
+            for path in filter(None, changed):
+                require(any(s == '.' or path == s or path.startswith(s + '/') for s in task['scope']),
+                        'out-of-scope change after new base: ' + path)
+            ctx.update(refresh_previous_base=task['base'], refresh_base=base, refresh_target=target,
+                       refresh_target_head=target_head, refresh_scope_verified=True)
         if r.get('op') == 'submit':
             _, current = ledger.load()
             task = current['tasks'].get(r.get('task')); require(task, 'unknown task')

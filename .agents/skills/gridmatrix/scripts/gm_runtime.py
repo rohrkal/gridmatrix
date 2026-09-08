@@ -47,6 +47,24 @@ def runtime_root(root, g):
     return p
 
 
+def remove_clean_worktree(root, worktree, g):
+    """Remove a clean temporary worktree after child handles settle on Windows."""
+    if not worktree.exists():
+        g.git(root, 'worktree', 'prune', check=False)
+        return True
+    status = g.git(worktree, 'status', '--porcelain', check=False)
+    if status.returncode or status.stdout:
+        return None
+    for delay in (0, 0.1, 0.2, 0.4, 0.8, 1.6):
+        if delay:
+            time.sleep(delay)
+        removed = g.git(root, 'worktree', 'remove', '--force', str(worktree), check=False)
+        if removed.returncode == 0 or not worktree.exists():
+            g.git(root, 'worktree', 'prune', check=False)
+            return True
+    return False
+
+
 def run_process(argv, cwd, directory, timeout=300, env=None, stdin=None, cap=4 * 1024 * 1024):
     """Capture output with bounded time/size, terminate the process tree on failure."""
     directory.mkdir(parents=True, exist_ok=True)
@@ -54,7 +72,8 @@ def run_process(argv, cwd, directory, timeout=300, env=None, stdin=None, cap=4 *
     out, err = directory / 'stdout.log', directory / 'stderr.log'
     status, code = 'failed', None
     with out.open('wb') as stdout, err.open('wb') as stderr:
-        kwargs = {'start_new_session': True} if os.name == 'posix' else {}
+        kwargs = ({'start_new_session': True} if os.name == 'posix' else
+                  {'creationflags': subprocess.CREATE_NEW_PROCESS_GROUP})
         try:
             child = subprocess.Popen(argv, cwd=cwd, stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
                                      stdout=stdout, stderr=stderr, env=env, **kwargs)
@@ -73,8 +92,14 @@ def run_process(argv, cwd, directory, timeout=300, env=None, stdin=None, cap=4 *
                 if os.name == 'posix':
                     os.killpg(child.pid, signal.SIGKILL)
                 else:
-                    subprocess.run(['taskkill', '/PID', str(child.pid), '/T', '/F'], capture_output=True, timeout=10)
-                    child.kill()
+                    try:
+                        child.send_signal(signal.CTRL_BREAK_EVENT)
+                        child.wait(timeout=2)
+                    except (OSError, subprocess.SubprocessError):
+                        subprocess.run(['taskkill', '/PID', str(child.pid), '/T', '/F'],
+                                       capture_output=True, timeout=10)
+                    if child.poll() is None:
+                        child.kill()
             code = child.wait(timeout=10)
         except (OSError, subprocess.SubprocessError) as exc:
             status = 'launch-error'
@@ -320,7 +345,7 @@ def integrate(root, args, g):
         return report
     finally:
         # A test that modified files leaves its worktree available for investigation.
-        g.git(root, 'worktree', 'remove', str(worktree), check=False)
+        remove_clean_worktree(root, worktree, g)
 
 
 def validate_review(value, g):
@@ -545,12 +570,19 @@ def peer(root, args, g):
         except (g.Error, OSError, ValueError, TypeError, KeyError) as exc:
             report.update(passed=False, error=scrub(str(exc)))
         ctx = g.context_at(worktree); ctx['runtime_record'] = True
+        cleanup = remove_clean_worktree(root, worktree, g)
+        if cleanup is False:
+            prior = report.get('error')
+            report.update(passed=False, acknowledged=False,
+                          error=(prior + '; ' if prior else '') +
+                                'temporary review worktree cleanup failed; artifact preserved')
         completion = {'id': rid, 'op': 'peer-complete', 'actor': args.actor, 'task': args.task, 'report': report}
         g.write_atomic(folder / 'completion.json', g.dumps(completion))
         ledger.apply(completion, ctx)
         return report
     finally:
-        g.git(root, 'worktree', 'remove', str(worktree), check=False)
+        if worktree.exists():
+            remove_clean_worktree(root, worktree, g)
 
 
 def guard(root, task_id, who, paths, g):

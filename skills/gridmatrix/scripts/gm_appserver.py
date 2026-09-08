@@ -44,7 +44,8 @@ def execute(binary, cwd, folder, prompt, schema, timeout, env, model=None, resum
         with (folder / 'stderr.log').open('w', encoding='utf-8') as err:
             child = subprocess.Popen([binary, 'app-server'], cwd=cwd, env=env, stdin=subprocess.PIPE,
                                      stdout=subprocess.PIPE, stderr=err, text=True, encoding='utf-8', errors='replace',
-                                     **({'start_new_session': True} if os.name == 'posix' else {}))
+                                     **({'start_new_session': True} if os.name == 'posix' else
+                                        {'creationflags': subprocess.CREATE_NEW_PROCESS_GROUP}))
             reader_thread = threading.Thread(target=reader, args=(child.stdout,), daemon=True)
             reader_thread.start()
 
@@ -52,7 +53,7 @@ def execute(binary, cwd, folder, prompt, schema, timeout, env, model=None, resum
                 child.stdin.write(json.dumps(value) + '\n'); child.stdin.flush()
 
             send({'jsonrpc': '2.0', 'id': 1, 'method': 'initialize',
-                  'params': {'clientInfo': {'name': 'gridmatrix', 'version': '2.1.1'}, 'capabilities': {}}})
+                  'params': {'clientInfo': {'name': 'gridmatrix', 'version': '2.2.0'}, 'capabilities': {}}})
             turn_id = None
             while time.monotonic() - started < timeout:
                 if total + (folder / 'stderr.log').stat().st_size > 4 * 1024 * 1024:
@@ -114,8 +115,14 @@ def execute(binary, cwd, folder, prompt, schema, timeout, env, model=None, resum
                 try: os.killpg(child.pid, signal.SIGKILL)
                 except ProcessLookupError: pass
             elif child.poll() is None:
-                subprocess.run(['taskkill', '/PID', str(child.pid), '/T', '/F'], capture_output=True, timeout=10)
-                child.kill()
+                try:
+                    child.send_signal(signal.CTRL_BREAK_EVENT)
+                    child.wait(timeout=2)
+                except (OSError, subprocess.SubprocessError):
+                    subprocess.run(['taskkill', '/PID', str(child.pid), '/T', '/F'],
+                                   capture_output=True, timeout=10)
+                if child.poll() is None:
+                    child.kill()
             child.wait(timeout=10)
             if reader_thread is not None: reader_thread.join(timeout=1)
             child.stdin.close()
