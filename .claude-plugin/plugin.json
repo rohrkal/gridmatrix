@@ -1,0 +1,20 @@
+{
+  "name": "gridmatrix",
+  "displayName": "Gridmatrix",
+  "version": "2.1.1",
+  "description": "A shared working protocol for Claude Code and Codex: one owner per task, atomic claims, bounded peer execution, captured evidence, independent cross-platform review, conflict recovery and measured project learning.",
+  "author": {
+    "name": "rohrkal",
+    "url": "https://github.com/rohrkal"
+  },
+  "homepage": "https://github.com/rohrkal/gridmatrix",
+  "repository": "https://github.com/rohrkal/gridmatrix",
+  "keywords": [
+    "coordination",
+    "multi-agent",
+    "codex",
+    "code-review",
+    "handoff",
+    "git"
+  ]
+}

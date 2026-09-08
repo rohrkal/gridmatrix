@@ -7,13 +7,29 @@ permissions:
   contents: read
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Windows is not optional cover here. The coordination ledger was completely
+    # unusable on Windows while this matrix was ubuntu-only and green: text-mode
+    # stdin put a CR in the mktree entry name, locale-decoded reads corrupted
+    # installed copies, and extensionless test fixtures were invisible to
+    # shutil.which so the adapter tests never ran. Keep both platforms.
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
+        os: [ubuntu-latest, windows-latest]
         python: ['3.9', '3.12']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+      - name: Configure Git defaults
+        # Defensive, not load-bearing: the suite sets a per-repository identity
+        # itself, and the byte-faithful installer already survives a CRLF checkout
+        # (verified on a machine with core.autocrlf=true). These defaults keep a
+        # failure here pointing at Gridmatrix rather than at runner configuration.
+        run: |
+          git config --global user.name "Gridmatrix CI"
+          git config --global user.email "ci@localhost"
+          git config --global core.autocrlf false
       - run: python -m unittest discover -s tests -v

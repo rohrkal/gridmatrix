@@ -1,0 +1,26 @@
+{
+  "name": "gridmatrix",
+  "owner": {
+    "name": "rohrkal",
+    "url": "https://github.com/rohrkal"
+  },
+  "description": "Gridmatrix: a shared working protocol for Claude Code and Codex on the same project.",
+  "plugins": [
+    {
+      "name": "gridmatrix",
+      "source": "./",
+      "displayName": "Gridmatrix",
+      "description": "Coordinate Claude Code and Codex on shared projects with atomic ownership, bounded peer execution, captured evidence, independent reviews, conflict recovery, integration checks and measured project learning.",
+      "homepage": "https://github.com/rohrkal/gridmatrix",
+      "repository": "https://github.com/rohrkal/gridmatrix",
+      "keywords": [
+        "coordination",
+        "multi-agent",
+        "codex",
+        "code-review",
+        "handoff",
+        "git"
+      ]
+    }
+  ]
+}
