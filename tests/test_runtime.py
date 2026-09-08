@@ -76,6 +76,15 @@ class RuntimeTests(unittest.TestCase):
     def apply(self, value, ok=True, authorize=False):
         return cli(self.root, 'apply', *(['--authorize-recovery'] if authorize else []), '-', data=json.dumps(value), ok=ok)
 
+    def env_cli(self, *args, ok=True, data=None):
+        # Pass an explicit environment: managed test hosts may sanitize inherited
+        # PATH changes while preserving an explicitly supplied subprocess env.
+        p = subprocess.run([sys.executable, str(SCRIPT), '--repo', str(self.root), *args],
+                           input=data, text=True, capture_output=True, env=dict(os.environ))
+        if ok and p.returncode:
+            raise AssertionError(p.stderr)
+        return p
+
     def submit(self):
         self.apply(dict(id='submit', op='submit', actor='codex:a', task='T1', head=self.head,
                         summary='submitted', evidence='baseline', not_done='none', next='review'))
@@ -83,15 +92,85 @@ class RuntimeTests(unittest.TestCase):
     def peer(self, rid='peer1', mode='pass', to='claude-code', adapter='exec', timeout=5):
         env = {'PATH': str(self.bin) + os.pathsep + os.environ['PATH'], 'GM_FIXTURE_MODE': mode}
         with patch.dict(os.environ, env):
-            return cli(self.root, 'peer', '--task', 'T1', '--actor', 'codex:a', '--to', to,
-                       '--adapter', adapter, '--id', rid, '--timeout', str(timeout), ok=False)
+            return self.env_cli('peer', '--task', 'T1', '--actor', 'codex:a', '--to', to,
+                                '--adapter', adapter, '--id', rid, '--timeout', str(timeout), ok=False)
 
     def state(self):
         return gm.Ledger(self.root).load()[1]
 
+    def move_task_onto_new_base(self, out_of_scope=False):
+        run(self.root, 'checkout', 'main')
+        (self.root / 'base.txt').write_text('integrated dependency\n')
+        run(self.root, 'add', 'base.txt'); run(self.root, 'commit', '-m', 'advance integration target')
+        new_base = run(self.root, 'rev-parse', 'HEAD')
+        run(self.root, 'checkout', 'gm/task'); run(self.root, 'merge', '--ff-only', 'main')
+        (self.root / 'app.py').write_text('answer = 43\n')
+        run(self.root, 'add', 'app.py')
+        if out_of_scope:
+            (self.root / 'outside.py').write_text('unexpected = True\n')
+            run(self.root, 'add', 'outside.py')
+        run(self.root, 'commit', '-m', 'task change')
+        self.head = run(self.root, 'rev-parse', 'HEAD')
+        return new_base
+
+    def refresh_base(self, rid, base, actor='codex:a', ok=True):
+        return self.apply(dict(id=rid, op='refresh-base', actor=actor, task='T1',
+                               base=base, target='refs/heads/main',
+                               evidence='Task moved onto the current integration target'), ok=ok)
+
+    def test_refresh_base_preserves_provenance_and_allows_submit(self):
+        old_base = self.state()['tasks']['T1']['base']
+        new_base = self.move_task_onto_new_base()
+        self.refresh_base('refresh', new_base)
+        task = self.state()['tasks']['T1']
+        self.assertEqual(task['base'], new_base)
+        self.assertEqual(task['base_refreshes'], [{
+            'from': old_base, 'to': new_base, 'target': 'refs/heads/main',
+            'target_head': new_base,
+            'evidence': 'Task moved onto the current integration target'}])
+        self.submit()
+        self.assertEqual(self.state()['tasks']['T1']['status'], 'review')
+
+    def test_refresh_base_rejects_wrong_owner_target_and_scope(self):
+        new_base = self.move_task_onto_new_base()
+        self.assertIn('only the task owner', self.refresh_base(
+            'wrong-owner', new_base, actor='claude-code:b', ok=False).stderr)
+        self.assertIn('named integration target', self.refresh_base(
+            'task-head-as-base', self.head, ok=False).stderr)
+
+        # A fresh fixture is required because the out-of-scope path is committed.
+        with tempfile.TemporaryDirectory() as folder:
+            root = repo(Path(folder) / 'project')
+            cli(root, 'init')
+            run(root, 'add', 'AGENTS.md', 'CLAUDE.md', '.agents', '.claude', '.gridmatrix')
+            run(root, 'commit', '-m', 'adopt'); run(root, 'checkout', '-b', 'gm/task')
+            old = run(root, 'rev-parse', 'HEAD')
+            request = claim(); request['base'] = old
+            cli(root, 'apply', '-', data=json.dumps(request))
+            run(root, 'checkout', 'main')
+            (root / 'base.txt').write_text('integrated\n'); run(root, 'add', 'base.txt')
+            run(root, 'commit', '-m', 'advance target'); base = run(root, 'rev-parse', 'HEAD')
+            run(root, 'checkout', 'gm/task'); run(root, 'merge', '--ff-only', 'main')
+            (root / 'outside.py').write_text('unexpected = True\n'); run(root, 'add', 'outside.py')
+            run(root, 'commit', '-m', 'outside scope')
+            refresh = dict(id='refresh', op='refresh-base', actor='codex:a', task='T1',
+                           base=base, target='refs/heads/main', evidence='moved')
+            result = cli(root, 'apply', '-', data=json.dumps(refresh), ok=False)
+            self.assertIn('out-of-scope change after new base: outside.py', result.stderr)
+
+    def test_refresh_base_rejects_backwards_or_submitted_task(self):
+        old_base = self.state()['tasks']['T1']['base']
+        new_base = self.move_task_onto_new_base()
+        self.refresh_base('refresh', new_base)
+        self.assertIn('descend from the previous base',
+                      self.refresh_base('backwards', old_base, ok=False).stderr)
+        self.submit()
+        self.assertIn('unsubmitted and building',
+                      self.refresh_base('after-submit', new_base, ok=False).stderr)
+
     def test_doctor_does_not_infer_authentication(self):
         with patch.dict(os.environ, {'PATH': str(self.bin) + os.pathsep + os.environ['PATH']}):
-            d = json.loads(cli(self.root, 'doctor').stdout)
+            d = json.loads(self.env_cli('doctor').stdout)
         self.assertTrue(d['platforms']['codex']['installed'])
         self.assertEqual(d['platforms']['codex']['authentication'], 'unverified')
         self.assertIsNone(d['live_pair_ready'])
@@ -294,12 +373,12 @@ class RuntimeTests(unittest.TestCase):
         self.apply(dict(id='submit2',op='submit',actor='claude-code:b',task='T2',head=self.head,summary='ready',evidence='fixture',not_done='none',next='review'))
         args=['peer','--task','T2','--actor','claude-code:b','--to','codex','--adapter','app-server','--id','rpc1','--timeout','3']
         with patch.dict(os.environ, {'PATH':str(self.bin)+os.pathsep+os.environ['PATH'],'GM_FIXTURE_MODE':'approval'}):
-            result=cli(self.root,*args,ok=False)
+            result=self.env_cli(*args,ok=False)
         self.assertNotEqual(result.returncode,0)
         self.assertEqual(self.state()['tasks']['T2']['status'],'review')
         args[args.index('rpc1')]='rpc2'; args+=['--resume-run','rpc1']
         with patch.dict(os.environ, {'PATH':str(self.bin)+os.pathsep+os.environ['PATH'],'GM_FIXTURE_MODE':'pass'}):
-            result=cli(self.root,*args,ok=False)
+            result=self.env_cli(*args,ok=False)
         self.assertEqual(result.returncode,0,result.stderr)
         self.assertEqual(self.state()['tasks']['T2']['status'],'approved')
 
@@ -318,7 +397,7 @@ class RuntimeTests(unittest.TestCase):
         self.apply(dict(id='submit2', op='submit', actor='claude-code:b', task='T2', head=self.head,
                         summary='ready', evidence='fixture', not_done='none', next='review'))
         with patch.dict(os.environ, {'PATH': str(self.bin) + os.pathsep + os.environ['PATH']}):
-            result = cli(self.root, 'peer', '--task', 'T2', '--actor', 'claude-code:b', '--to', 'codex', '--id', 'exec1')
+            result = self.env_cli('peer', '--task', 'T2', '--actor', 'claude-code:b', '--to', 'codex', '--id', 'exec1')
         self.assertEqual(self.state()['tasks']['T2']['review']['actor'], 'codex:run-exec1')
 
     def test_dependencies_and_contracts_fail_closed(self):
@@ -388,7 +467,7 @@ class RuntimeTests(unittest.TestCase):
         run(self.root,'add','app.py'); run(self.root,'commit','-m','scoped correction')
         self.head=run(self.root,'rev-parse','HEAD')
         with patch.dict(os.environ, {'PATH':str(self.bin)+os.pathsep+os.environ['PATH']}):
-            cli(self.root,'peer','--task','T1','--actor','codex:a','--to','claude-code','--kind','verify','--id','verify')
+            self.env_cli('peer','--task','T1','--actor','codex:a','--to','claude-code','--kind','verify','--id','verify')
         state=self.state()
         self.assertFalse(gm.blockers(state,'T1'))
         self.assertEqual(state['tasks']['T1']['status'],'building')
@@ -437,7 +516,7 @@ class RuntimeTests(unittest.TestCase):
         self.submit(); self.peer('bad', 'changes')
         self.apply(dict(id='fix-plan',op='remediate',actor='codex:a',task='T1',notices=['bad-finding-0'],scope=['app.py'],evidence='Correct defect'))
         with patch.dict(os.environ,{'PATH':str(self.bin)+os.pathsep+os.environ['PATH'],'GM_FIXTURE_MODE':'changes'}):
-            cli(self.root,'peer','--task','T1','--actor','codex:a','--to','claude-code','--kind','verify','--id','still-bad')
+            self.env_cli('peer','--task','T1','--actor','codex:a','--to','claude-code','--kind','verify','--id','still-bad')
         state=self.state()
         self.assertNotEqual(state['notices']['bad-finding-0']['status'],'resolved')
         self.assertTrue(gm.blockers(state,'T1'))

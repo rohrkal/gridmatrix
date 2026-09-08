@@ -52,7 +52,7 @@ def execute(binary, cwd, folder, prompt, schema, timeout, env, model=None, resum
                 child.stdin.write(json.dumps(value) + '\n'); child.stdin.flush()
 
             send({'jsonrpc': '2.0', 'id': 1, 'method': 'initialize',
-                  'params': {'clientInfo': {'name': 'gridmatrix', 'version': '2.1.1'}, 'capabilities': {}}})
+                  'params': {'clientInfo': {'name': 'gridmatrix', 'version': '2.2.0'}, 'capabilities': {}}})
             turn_id = None
             while time.monotonic() - started < timeout:
                 if total + (folder / 'stderr.log').stat().st_size > 4 * 1024 * 1024:
