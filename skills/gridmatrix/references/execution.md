@@ -1,4 +1,4 @@
-# Execution adapters (2.1)
+# Execution adapters (2.1.1)
 
 ## Contents
 
@@ -11,7 +11,11 @@
 ## Capability discovery and bounded peers
 
 `doctor` reports installed CLIs, versions and required flag availability, plus
-coordination read access. It never reads credential files or treats installation
+coordination read access and installed-copy differences against the running skill.
+`live_pair_ready` is false when a CLI is absent and null when execution is unverified.
+Recent successful run records are shown separately as historical observations;
+they do not certify current authentication or live availability.
+Doctor never reads credential files or treats installation
 as authentication. Both CLIs are optional; a successful actual run is the execution
 probe. Missing tools leave a manual handoff and review pending.
 
@@ -123,7 +127,8 @@ report remains unchanged and the blocker stays open until successor `resolve`.
 
 Abandoned peer run: `op: recover-run`, run (original ID), actor (coordinator),
 authorization, evidence that the process stopped. The run is recorded cancelled;
-its attempt still counts toward the task budget. Never cancel a live process by
+its attempt still counts toward the task budget. An explicitly recovered current
+task owner may recover a predecessor run; both identities remain recorded. Never cancel a live process by
 changing ledger state alone. No identity impersonation or automatic timer takeover.
 
 ## Hooks and MCP
@@ -150,7 +155,7 @@ Configure it in either platform with executable python3 and args:
 
 Generate a fresh actor per launched session. Server configuration binds the actor;
 request bodies cannot override it. Tools: read_inbox, claim_task, report_defect,
-submit_review, transact. They call the same validated CLI. Runtime execution,
+submit_review, transact (including scoped remediate). They call the same validated CLI. Runtime execution,
 recovery, integration, ownership cancellation and permission configuration are
 excluded. The local stdio boundary inherits the launcher identity and permissions;
 it is not a remotely authenticated multi-user server.
@@ -169,3 +174,33 @@ References: [Codex exec](https://developers.openai.com/codex/non-interactive-mod
 [Claude programmatic runs](https://code.claude.com/docs/en/headless),
 [Claude hooks](https://code.claude.com/docs/en/hooks),
 [MCP stdio](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports).
+
+## Defect correction and interrupted completion
+
+After a rejecting review, the owner can apply a `remediate` request:
+
+```json
+{"id":"fix-plan-001","op":"remediate","actor":"codex:SESSION","task":"T-001",
+ "notices":["peer-001-finding-0"],"scope":["src/validation.py"],
+ "evidence":"Correct the reported blank-input failure"}
+```
+
+Name every current blocking notice and a literal scope contained in the task scope.
+Only task-specific DEFECT/ASSUMPTION blockers qualify; collisions and global
+blockers still require resolution before writing. `guard` and strict hooks permit
+only these scoped edits. A new blocker invalidates the plan until explicitly updated.
+Commit the fix, then run `peer --kind verify` at the clean corrected head. The peer
+receives the named findings and verifies all of them. Its passing completion resolves
+them with its own identity and source SHA; it does not approve the whole task.
+Submit and obtain ordinary independent review afterward. With manual review, the
+original reporter or explicitly recovered verifier can resolve each notice with
+verification evidence; never impersonate an unavailable automated reviewer.
+
+Peer completion publishes findings, verdict and execution record in one atomic
+ledger transaction. Interrupted publication leaves a local completion.json in the
+run directory. Retry the identical peer command at the same source head to publish
+that saved result without launching another model. Completed matching requests
+return their previous result even after approval. Changed inputs fail; a new run
+requires a new ID. If the source, ownership or task state changed, preserve the old
+result and recover the obsolete run explicitly instead of applying it to new work.
+Update both platform copies before using these operations.

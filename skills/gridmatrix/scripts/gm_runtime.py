@@ -117,16 +117,41 @@ def cli_capability(binary):
     return result
 
 
+def installation_freshness(root):
+    source = Path(__file__).resolve().parents[1]
+    expected = [source / 'SKILL.md', *sorted((source / 'scripts').glob('*.py')),
+                *sorted((source / 'references').glob('*.md'))]
+    copies = {}
+    for name in ('.agents/skills/gridmatrix', '.claude/skills/gridmatrix'):
+        changed = []
+        for path in expected:
+            target = root / name / path.relative_to(source)
+            if not target.is_file() or target.read_bytes() != path.read_bytes():
+                changed.append(path.relative_to(source).as_posix())
+        copies[name] = {'matches_running_skill': not changed, 'different_or_missing': changed}
+    return {'reference': 'currently running skill; not an upstream release lookup', 'copies': copies}
+
+
 def doctor(root, g):
     result = {'gridmatrix': g.VERSION, 'python': platform.python_version(), 'os': platform.system(),
               'platforms': {p: cli_capability(b) for p, b in [('codex', 'codex'), ('claude-code', 'claude')]}}
     try:
-        ledger = g.Ledger(root); head, _ = ledger.load()
+        ledger = g.Ledger(root); head, state = ledger.load()
         result['coordination'] = {'transport': ledger.remote or 'local-worktrees-only', 'read': 'verified',
                                   'write': 'unverified until transaction succeeds', 'commit': head}
     except (g.Error, OSError, ValueError) as exc:
         result['coordination'] = {'read': 'unavailable', 'reason': scrub(str(exc))}
-    result['live_pair_ready'] = False  # Installation is not authentication or an execution test.
+    result['installation'] = installation_freshness(root)
+    available = all(p['installed'] for p in result['platforms'].values())
+    result['live_pair_ready'] = None if available else False
+    result['readiness'] = 'execution-unverified' if available else 'missing-cli'
+    result['observed_peer_runs'] = [
+        {'id': rid, 'recipient': run.get('recipient'), 'head': run.get('head'),
+         'cli_version': run.get('cli_version'), 'completed_at': run.get('completed_at')}
+        for rid, run in sorted((state.get('runs', {}) if 'state' in locals() else {}).items(),
+                               key=lambda item: (item[1].get('completed_at') or '', item[0]))
+        if run.get('kind') == 'peer' and run.get('passed') and run.get('acknowledged')][-10:]
+    result['observation_limits'] = 'Historical cooperative records do not prove current credentials, model identity or live connectivity.'
     result['next'] = 'Run a bounded peer request to verify execution; missing CLIs require installation in the execution environment.'
     return result
 
@@ -328,17 +353,29 @@ def peer(root, args, g):
     t = state['tasks'].get(args.task)
     g.require(t and t['owner'] == args.actor, 'only task coordinator may dispatch a peer')
     g.require(args.to != t['builder_platform'], 'dispatch to the other platform')
-    g.require(t['status'] == ('review' if args.kind == 'review' else 'building'), 'invalid task state for this peer request')
     head = g.context_at(root)['head']
     g.require(head and not g.git(root, 'status', '--porcelain').stdout, 'peer request requires a clean source commit')
-    if args.kind == 'review':
-        g.require(head == t['head'], 'peer must review the submitted head')
-    g.require(not g.blockers(state, args.task), 'resolve blockers before dispatch')
     rid = request_id(args.id, g)
     plan = fingerprint({'task': args.task, 'actor': args.actor, 'head': head, 'to': args.to, 'kind': args.kind, 'model': args.model, 'timeout': args.timeout, 'turns': args.max_turns, 'dollars': args.max_dollars, 'adapter': args.adapter, 'resume_run': args.resume_run})
     previous = replay(state, rid, plan, g)
     if previous:
         return previous
+    g.require(t['status'] == ('review' if args.kind == 'review' else 'building'), 'invalid task state for this peer request')
+    if args.kind == 'review':
+        g.require(head == t['head'], 'peer must review the submitted head')
+    if args.kind == 'verify':
+        g.require(g.remediation_allowed(state, t), 'record scoped remediation before verification')
+    else:
+        g.require(not g.blockers(state, args.task), 'resolve blockers before dispatch')
+    pending = runtime_root(root, g) / rid / 'completion.json'
+    if pending.is_file():
+        request = json.loads(pending.read_text())
+        g.require(request.get('report', {}).get('plan_sha256') == plan, 'pending run inputs differ')
+        ctx = g.context_at(root); ctx['runtime_record'] = True
+        # The completed reviewer used a separate worktree, which may already be removed.
+        ctx['workspace'] = state['runs'][rid + '-start'].get('reviewer_workspace', str(pending.parent / 'worktree'))
+        ledger.apply(request, ctx)
+        return request['report']
     count = sum(r.get('kind') == 'peer-start' and r.get('task') == args.task for r in state.get('runs', {}).values())
     g.require(count < args.max_runs, 'task peer-run budget exhausted')
     g.require(args.adapter != 'app-server' or args.to == 'codex', 'app-server adapter requires Codex')
@@ -361,6 +398,9 @@ def peer(root, args, g):
               'Inspect the acceptance criteria and relevant source first; find concrete failure cases. '
               'Return only the requested structured review. A pass with S0/S1 findings is invalid. '
               'Disclose checks you could not run.\nTASK:\n' + json.dumps({k: t[k] for k in ['id', 'goal', 'acceptance', 'scope', 'base']}) +
+              '\nRemediation: ' + json.dumps(t.get('remediation') if args.kind == 'verify' else None) +
+              '\nBlocking findings: ' + json.dumps(g.blockers(state, args.task) if args.kind == 'verify' else []) +
+              '\nFor verification, pass only if every named defect is fixed; disclose verification limits.' +
               '\nChecked-out source: ' + head + '\nReview kind: ' + args.kind)
     g.require(len(prompt.encode()) <= 30000, 'peer task packet exceeds 30 KB; narrow the task')
     folder = runtime_root(root, g) / rid; folder.mkdir(exist_ok=False)
@@ -369,7 +409,7 @@ def peer(root, args, g):
     g.git(root, 'worktree', 'add', '--detach', str(worktree), head)
     peer_actor = args.to + ':run-' + rid
     capture(root, ledger, args.task, args.actor, rid + '-start',
-            {'kind': 'peer-start', 'head': head, 'passed': False, 'status': 'dispatch-requested', 'recipient': peer_actor, 'max_runs': args.max_runs}, g)
+            {'kind': 'peer-start', 'head': head, 'passed': False, 'status': 'dispatch-requested', 'recipient': peer_actor, 'max_runs': args.max_runs, 'plan_sha256': plan, 'reviewer_workspace': g.context_at(worktree)['workspace']}, g)
     env = dict(os.environ, GRIDMATRIX_PEER_DEPTH='1', GRIDMATRIX_ACTOR=peer_actor,
                GRIDMATRIX_TASK=args.task, GIT_TERMINAL_PROMPT='0')
     try:
@@ -381,6 +421,8 @@ def peer(root, args, g):
                                     worktree, folder, args.timeout, env, prompt)
         report = {'kind': 'peer', 'plan_sha256': plan, 'purpose': args.kind, 'head': head, 'recipient': peer_actor,
                   'model': args.model or 'platform-default (unreported)', 'cli_version': capability['version'], 'session_id': execution.get('session_id'),
+                  'completed_at': g.datetime.now(g.timezone.utc).isoformat(),
+                  'remediation': t.get('remediation') if args.kind == 'verify' else None,
                   'passed': False, 'acknowledged': False, 'execution': execution, 'artifact_directory': str(folder)}
         try:
             g.require(execution['status'] == 'passed', 'peer process did not succeed')
@@ -399,20 +441,12 @@ def peer(root, args, g):
             value = validate_review(value, g)
             value = {k: ([{fk: scrub(fv) for fk, fv in f.items()} for f in v] if k == 'findings' else scrub(v)) for k, v in value.items()}
             report.update(passed=True, acknowledged=True, result=value)
-            # Refresh before accepting output. Source could have been resubmitted while the peer ran.
-            _, fresh = ledger.load(); latest = fresh['tasks'][args.task]
-            g.require(latest['owner'] == args.actor and (args.kind != 'review' or latest['head'] == head), 'peer result is stale')
-            for i, f in enumerate(value['findings']):
-                ledger.apply({'id': rid + '-finding-' + str(i), 'op': 'notice', 'actor': peer_actor,
-                              'task': args.task, 'to': t['builder_platform'], 'kind': 'DEFECT' if args.kind == 'review' else 'ASSUMPTION',
-                              'severity': f['severity'], 'summary': f['problem'], 'evidence': f['location'] + ': ' + f['evidence']}, g.context_at(worktree))
-            if args.kind == 'review':
-                ledger.apply({'id': rid + '-review', 'op': 'review', 'actor': peer_actor, 'task': args.task,
-                              'head': head, 'verdict': value['verdict'], 'evidence': value['summary'], 'limits': value['limits'],
-                              'model': report['model']}, g.context_at(worktree))
         except (g.Error, OSError, ValueError, TypeError) as exc:
             report.update(passed=False, error=scrub(str(exc)))
-        capture(root, ledger, args.task, args.actor, rid, report, g)
+        ctx = g.context_at(worktree); ctx['runtime_record'] = True
+        completion = {'id': rid, 'op': 'peer-complete', 'actor': args.actor, 'task': args.task, 'report': report}
+        g.write_atomic(folder / 'completion.json', g.dumps(completion))
+        ledger.apply(completion, ctx)
         return report
     finally:
         g.git(root, 'worktree', 'remove', str(worktree), check=False)
@@ -423,14 +457,16 @@ def guard(root, task_id, who, paths, g):
     g.require(t and t['owner'] == who and t['status'] == 'building', 'no active writable claim for this actor')
     ctx = g.context_at(root)
     g.require(ctx['workspace'] == t['workspace'] and ctx['branch'] == t['branch'], 'writer is outside claimed workspace')
-    g.require(not g.blockers(state, task_id), 'task has blocking notices')
+    active = g.blockers(state, task_id)
+    g.require(not active or g.remediation_allowed(state, t), 'task has blocking notices; record scoped remediation')
+    scope = t['remediation']['scope'] if active else t['scope']
     for p in paths:
         path = Path(p)
         if not path.is_absolute():
             path = root / path
         g.safe_target(root, path)
         relative = path.resolve().relative_to(root).as_posix()
-        g.require(any(s == '.' or relative == s or relative.startswith(s + '/') for s in t['scope']), 'write outside claim: ' + relative)
+        g.require(any(s == '.' or relative == s or relative.startswith(s + '/') for s in scope), 'write outside claim: ' + relative)
     return {'allowed': True, 'task': task_id}
 
 
@@ -466,7 +502,7 @@ def dispatch(argv, core):
             a.add_argument('--target', required=True)
         if name == 'peer':
             a.add_argument('--to', choices=['codex', 'claude-code'], required=True)
-            a.add_argument('--kind', choices=['review', 'spec'], default='review')
+            a.add_argument('--kind', choices=['review', 'spec', 'verify'], default='review')
             a.add_argument('--adapter', choices=['exec', 'app-server'], default='exec')
             a.add_argument('--resume-run', help='resume a prior app-server run at the same source head')
             a.add_argument('--model'); a.add_argument('--max-turns', type=int, default=8)

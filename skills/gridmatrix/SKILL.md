@@ -18,7 +18,9 @@ your real platform; never manufacture a peer response or impersonate a lost sess
    customizations outside managed skill files and marked instruction blocks.
 3. Set `GM` to the absolute installed script path. Read `.gridmatrix/PROJECT.md`;
    run `python3 "$GM" doctor`, then `status`. Doctor reports availability, not
-   successful authentication. Existing v2 ledgers require the documented `upgrade`.
+   successful authentication. Check installed-copy freshness against this running
+   skill; historical runs do not prove live connectivity. Existing v2.0 ledgers
+   require the documented `upgrade`.
 4. Use your platform plus a generated `session` suffix as identity. Retain it
    through the session. Read applicable active lessons and outstanding notices;
    acknowledge messages from other sessions addressed to you with evidence and a
@@ -58,7 +60,12 @@ severity, evidence, impact and next action. A chat-only observation is not deliv
 
 Recipients acknowledge; the assigned reporter/verifier verifies and resolves.
 Acknowledgment/dispute retains blockers. Stop affected work for S0/S1 and collisions;
-continue independent authorized work. After two evidence-based exchanges without
+continue independent authorized work. For task defects, record a `remediate` plan
+with the exact blocking notice IDs and a narrower write scope. This permits only
+the scoped correction; approval remains blocked. Use `peer --kind verify` to have
+the other platform verify the named defects, then submit for normal review.
+Collisions and global blockers cannot use this exception. See execution.md.
+After two evidence-based exchanges without
 resolution, record both positions and ask the precise unresolved user question.
 
 Successful ledger writes mean recorded. Only actual peer output/acknowledgment

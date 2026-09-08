@@ -14,7 +14,7 @@ import tempfile
 import uuid
 from datetime import datetime, timezone
 
-VERSION = '2.1.0'
+VERSION = '2.1.1'
 PLATFORMS = {'codex', 'claude-code'}
 BEGIN, END = '<!-- gridmatrix:begin -->', '<!-- gridmatrix:end -->'
 BLOCK = f'''{BEGIN}
@@ -85,6 +85,14 @@ def blockers(state, task):
     return [n for n in state['notices'].values()
             if n['task'] in (task, '*') and n['blocking'] and n['status'] != 'resolved']
 
+def remediation_allowed(state, task):
+    plan = task.get('remediation') or {}
+    active = blockers(state, task['id'])
+    return bool(plan and active and
+                {n['id'] for n in active} == set(plan['notices']) and
+                all(n['task'] == task['id'] and n['kind'] in ('DEFECT', 'ASSUMPTION') for n in active))
+
+
 def transition(state, r, context):
     """Validate one request against the latest state. Never trust a stale claim."""
     s = copy.deepcopy(state)
@@ -101,6 +109,53 @@ def transition(state, r, context):
     s.setdefault('runs', {})
     if op == 'upgrade':
         s['schema'] = 3
+    elif op == 'remediate':
+        t = s['tasks'].get(r.get('task'))
+        require(t and t['owner'] == who and t['status'] == 'building', 'building task owner required')
+        require(context['workspace'] == t['workspace'] and context['branch'] == t['branch'], 'use claimed worktree')
+        notices = r.get('notices'); scope = r.get('scope')
+        require(isinstance(notices, list) and notices and all(isinstance(n, str) for n in notices), 'name blocking notice IDs')
+        require(isinstance(scope, list) and scope, 'name remediation scope')
+        scope = [scope_path(p) for p in scope]
+        require(all(any(parent == '.' or p == parent or p.startswith(parent + '/') for parent in t['scope']) for p in scope), 'remediation exceeds task scope')
+        t['remediation'] = {'notices': notices, 'scope': scope, 'evidence': required(r, 'evidence')}
+        require(remediation_allowed(s, t), 'remediation must cover current task defects; collisions and global blockers require resolution')
+        t.update(review=None, integration=None)
+    elif op == 'peer-complete':
+        require(context.get('runtime_record'), 'peer completion requires the runtime')
+        t = s['tasks'].get(r.get('task')); report = r.get('report')
+        require(t and t['owner'] == who and isinstance(report, dict), 'invalid peer completion owner/report')
+        start = s['runs'].get(rid + '-start')
+        require(start and start['actor'] == who and start['task'] == t['id'] and rid not in s['runs'], 'missing or closed peer start')
+        require(report.get('head') == start['head'], 'stale peer source')
+        if report.get('passed'): require(start['head'] == context['head'], 'stale peer source')
+        require(report.get('recipient') == start['recipient'], 'peer identity changed')
+        require(report.get('plan_sha256') == start.get('plan_sha256'), 'peer inputs changed')
+        if report.get('passed'):
+            import gm_runtime
+            value = gm_runtime.validate_review(report.get('result'), gm_runtime.api(globals()))
+            peer = report['recipient']; require(actor(peer) != t['builder_platform'], 'independent peer required')
+            purpose = report['purpose']
+            require(t['status'] == ('review' if purpose == 'review' else 'building'), 'peer result is stale')
+            if purpose == 'review': require(t['head'] == report['head'], 'peer result is stale')
+            if purpose == 'verify':
+                require(remediation_allowed(s, t) and report.get('remediation') == t['remediation'], 'remediation changed during verification')
+                if value['verdict'] == 'pass':
+                    for nid in t['remediation']['notices']:
+                        n = s['notices'][nid]
+                        n['responses'].append({'actor': peer, 'action': 'verify-remediation', 'head': report['head'], 'evidence': value['summary']})
+                        n['status'] = 'resolved'
+                    t['remediation'] = None
+            else: require(not blockers(s, t['id']), 'new blockers invalidate peer completion')
+            for i, f in enumerate(value['findings']):
+                s = transition(s, {'id': rid + '-finding-' + str(i), 'op': 'notice', 'actor': peer,
+                                  'task': t['id'], 'to': t['builder_platform'], 'kind': 'ASSUMPTION' if purpose == 'spec' else 'DEFECT',
+                                  'severity': f['severity'], 'summary': f['problem'], 'evidence': f['location'] + ': ' + f['evidence']}, context)
+            if purpose == 'review':
+                s = transition(s, {'id': rid + '-review', 'op': 'review', 'actor': peer, 'task': t['id'],
+                                  'head': report['head'], 'verdict': value['verdict'], 'evidence': value['summary'],
+                                  'limits': value['limits'], 'model': report['model']}, context)
+        s['runs'][rid] = dict(report, actor=who, task=t['id'])
     elif op == 'claim':
         tid = required(r, 'task')
         require(re.fullmatch(r'[A-Za-z0-9._-]{1,100}', tid), 'invalid task id')
@@ -163,7 +218,7 @@ def transition(state, r, context):
                 require(context['workspace'] == t['workspace'] and context['branch'] == t['branch'],
                         'submit from the claimed worktree and branch, or transfer first')
                 t.update(status='review', head=r['head'], review=None, integration=None,
-                         handoff={'summary': required(r, 'summary'), 'evidence': required(r, 'evidence'),
+                         remediation=None, handoff={'summary': required(r, 'summary'), 'evidence': required(r, 'evidence'),
                                   'not_done': required(r, 'not_done'), 'next': required(r, 'next')})
             elif op == 'finish':
                 require(t['status'] == 'approved', 'independent approval required')
@@ -209,9 +264,12 @@ def transition(state, r, context):
         run = required(r, 'run')
         require(run + '-start' in s['runs'] and run not in s['runs'], 'run is not abandoned/in-flight')
         start = s['runs'][run + '-start']
-        require(start['actor'] == who, 'original coordinator must recover its run')
+        task = s['tasks'].get(start['task'])
+        require(start['actor'] == who or (task and task['owner'] == who and
+                any(x['from'] == start['actor'] for x in task.get('recoveries', []))),
+                'original coordinator or authorized recovered owner required')
         s['runs'][run] = {'kind': 'peer', 'passed': False, 'status': 'operator-cancelled', 'task': start['task'],
-                          'actor': who, 'authorization': required(r, 'authorization'), 'evidence': required(r, 'evidence')}
+                          'actor': who, 'original_actor': start['actor'], 'authorization': required(r, 'authorization'), 'evidence': required(r, 'evidence')}
     elif op == 'recover':
         require(context.get('recovery_authorized'), 'recovery requires explicit operator authorization')
         reason = required(r, 'authorization')
@@ -235,7 +293,7 @@ def transition(state, r, context):
                     require(other['workspace'] != context['workspace'] and other['branch'] != context['branch'], 'destination already claimed')
             t.setdefault('recoveries', []).append({'from': t['owner'], 'to': successor, 'authorization': reason, 'evidence': r['evidence']})
             t.update(owner=successor, workspace=context['workspace'], branch=context['branch'],
-                     status='building', head=None, review=None, integration=None)
+                     status='building', head=None, review=None, integration=None, remediation=None)
     elif op in ('capture', 'integration'):
         require(context.get('runtime_record'), 'use the evidence/integration runner to record execution')
         t = s['tasks'].get(r.get('task')); require(t, 'unknown task')
@@ -496,6 +554,9 @@ def main(argv=None):
         require('SKILL.md' in expected and expected == actual, 'skill copies missing or drifted')
         for f in expected:
             require((first / f).read_bytes() == (second / f).read_bytes(), 'skill copies drifted: ' + f)
+        freshness = gm_runtime.installation_freshness(root)
+        require(all(c['matches_running_skill'] for c in freshness['copies'].values()),
+                'project skill copies differ from running skill; run init from the intended updated skill')
         if args.task:
             t = state['tasks'].get(args.task); require(t, 'unknown task')
             require(t['status'] in ('approved', 'done') and t['review'] and t['review']['verdict'] == 'pass',

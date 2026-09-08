@@ -2,7 +2,7 @@
 
 A shared working protocol for **Claude Code + Codex**: one owner per task,
 independent reviews, explicit problem reporting, and project memory that improves
-with use. One portable skill with a Python/Git runtime. **Version 2.1.0.**
+with use. One portable skill with a Python/Git runtime. **Version 2.1.1.**
 
 ## Start on any project
 
@@ -32,7 +32,7 @@ useful authorized work in the same turn.
 | --- | --- |
 | Avoid collisions | Atomic claims reject overlapping paths, reused branches and working directories. Parallel writers use separate worktrees. |
 | Communicate reliably | Git-backed records with unique IDs, retry deduplication, explicit recipient acknowledgments and evidence. |
-| Expose mistakes | Both agents must report defects, collisions and changed assumptions. Critical notices block affected tasks until verified resolved. |
+| Expose mistakes | Critical notices block approval; explicitly scoped corrections can proceed and the peer verifies them before normal review. |
 | Improve quality | Bounded peer spec/review runs, captured checks, exact-commit approval and tests against the current integration target. |
 | Respect dependencies | Claims require completed prerequisites in the source branch; pinned shared interfaces detect logical conflicts. |
 | Recover interruptions | Explicit operator recovery preserves old/new identities and keeps unresolved defects blocking. |
@@ -63,7 +63,12 @@ execution, failed runs and invalid responses never become peer approval.
 | MCP stdio | Identity-bound coordination tools backed by the same ledger |
 | Git worktrees + CI | Isolated writers/reviewers and tested integration candidates |
 
-Run `doctor` to discover available capabilities. The adapters have controlled
+Peer completion records findings, verdict and execution together. Identical retries
+reuse saved results; recovered owners can clear abandoned predecessor runs with
+explicit authorization.
+
+Run `doctor` to discover available capabilities and compare project copies with
+the running skill. Historical peer results are shown separately from live readiness. The adapters have controlled
 subprocess coverage; **live Claude/Codex compatibility is still awaiting validation
 on an authenticated installation**. Commands, configuration and limits are in
 [execution.md](skills/gridmatrix/references/execution.md).
@@ -87,7 +92,8 @@ python3 gridmatrix.py --repo /path/to/project doctor
 python3 -m unittest discover -s tests -v
 ```
 
-`check` verifies structure; it does not claim your application tests pass.
+`check` verifies structure and instructions/runtime freshness against the running
+skill; it does not discover upstream releases or claim your application tests pass.
 `check --task T-001` additionally requires approval at the current clean HEAD and
 passing integration evidence against an unchanged target.
 The task owner integrates within the user's authorization and validates the

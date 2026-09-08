@@ -92,7 +92,7 @@ class RuntimeTests(unittest.TestCase):
             d = json.loads(cli(self.root, 'doctor').stdout)
         self.assertTrue(d['platforms']['codex']['installed'])
         self.assertEqual(d['platforms']['codex']['authentication'], 'unverified')
-        self.assertFalse(d['live_pair_ready'])
+        self.assertIsNone(d['live_pair_ready'])
 
     def test_capture_real_exit_code_and_replay(self):
         args = ['evidence', '--task', 'T1', '--actor', 'codex:a', '--id', 'check1', '--commands', str(self.commands)]
@@ -281,6 +281,91 @@ class RuntimeTests(unittest.TestCase):
         result = gm_appserver.execute(str(binary), self.root, folder, 'review', rt.REVIEW_SCHEMA, 2, dict(os.environ))
         self.assertEqual(result['status'], 'output-limit')
         self.assertLessEqual((folder / 'stderr.log').stat().st_size, 4 * 1024 * 1024)
+
+    def test_completed_peer_replay_after_approval(self):
+        self.submit(); first = self.peer('replay')
+        self.assertEqual(first.returncode, 0, first.stderr)
+        second = self.peer('replay')
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual(self.state()['tasks']['T1']['review_rounds'], 1)
+        self.assertNotEqual(self.peer('replay', timeout=4).returncode, 0)
+
+    def test_scoped_remediation_and_independent_verification(self):
+        self.submit(); self.peer('bad', 'changes')
+        self.assertNotEqual(cli(self.root,'guard','--task','T1','--actor','codex:a','app.py',ok=False).returncode,0)
+        self.apply(dict(id='fix-plan',op='remediate',actor='codex:a',task='T1',notices=['bad-finding-0'],scope=['app.py'],evidence='Fix reported input case'))
+        cli(self.root,'guard','--task','T1','--actor','codex:a','app.py')
+        self.assertNotEqual(cli(self.root,'guard','--task','T1','--actor','codex:a','README.md',ok=False).returncode,0)
+        self.assertTrue(gm.blockers(self.state(),'T1'))
+        (self.root/'app.py').write_text('answer = 6 * 7\n')
+        run(self.root,'add','app.py'); run(self.root,'commit','-m','scoped correction')
+        self.head=run(self.root,'rev-parse','HEAD')
+        with patch.dict(os.environ, {'PATH':str(self.bin)+os.pathsep+os.environ['PATH']}):
+            cli(self.root,'peer','--task','T1','--actor','codex:a','--to','claude-code','--kind','verify','--id','verify')
+        state=self.state()
+        self.assertFalse(gm.blockers(state,'T1'))
+        self.assertEqual(state['tasks']['T1']['status'],'building')
+        self.assertIsNone(state['tasks']['T1']['review'])
+        self.apply(dict(id='resubmit',op='submit',actor='codex:a',task='T1',head=self.head,summary='corrected',evidence='verified',not_done='none',next='review'))
+        final=self.peer('final-review'); self.assertEqual(final.returncode,0,final.stderr)
+
+    def test_remediation_cannot_bypass_collision(self):
+        self.apply(dict(id='collision',op='notice',actor='claude-code:b',task='T1',to='codex',kind='COLLISION',severity='S1',summary='writer collision',evidence='concurrent writer'))
+        r=dict(id='plan',op='remediate',actor='codex:a',task='T1',notices=['collision'],scope=['app.py'],evidence='attempt')
+        self.assertNotEqual(self.apply(r,ok=False).returncode,0)
+        self.assertNotIn('remediation',self.state()['tasks']['T1'])
+
+    def test_recovered_owner_can_cancel_predecessor_orphan(self):
+        ledger=gm.Ledger(self.root);ctx=gm.context_at(self.root);ctx['runtime_record']=True
+        ledger.apply(dict(id='lost-start',op='capture',actor='codex:a',task='T1',report=dict(kind='peer-start',max_runs=3)),ctx)
+        self.apply(dict(id='recover-task',op='recover',actor='codex:new',task='T1',expected_owner='codex:a',to='codex:new',authorization='Continue abandoned task',evidence='Old writer stopped'),authorize=True)
+        recovery=dict(id='recover-run',op='recover-run',actor='codex:new',run='lost',authorization='Continue abandoned task',evidence='Process stopped')
+        self.assertNotEqual(self.apply(recovery,ok=False).returncode,0)
+        self.apply(recovery,authorize=True)
+        self.assertEqual(self.state()['runs']['lost']['original_actor'],'codex:a')
+        self.assertEqual(self.state()['runs']['lost']['actor'],'codex:new')
+
+    def test_completion_publication_is_atomic_and_retry_does_not_execute(self):
+        from types import SimpleNamespace
+        self.submit()
+        args=SimpleNamespace(task='T1',actor='codex:a',to='claude-code',kind='review',id='atomic',model=None,timeout=5,max_turns=8,max_dollars=2,adapter='exec',resume_run=None,max_runs=3)
+        original=gm.Ledger.apply
+        def fail(ledger,request,ctx):
+            if request['op']=='peer-complete':
+                # Validate the whole transition, then simulate failure before ref publication.
+                gm.transition(ledger.load()[1],request,ctx)
+                raise gm.Error('simulated publication outage')
+            return original(ledger,request,ctx)
+        with patch.dict(os.environ,{'PATH':str(self.bin)+os.pathsep+os.environ['PATH']}),patch.object(gm.Ledger,'apply',fail):
+            with self.assertRaisesRegex(gm.Error,'simulated'):
+                rt.peer(self.root,args,rt.api(gm.__dict__))
+        state=self.state(); self.assertEqual(state['tasks']['T1']['status'],'review')
+        self.assertIsNone(state['tasks']['T1']['review']);self.assertNotIn('atomic',state['runs'])
+        with patch.object(rt,'cli_capability',side_effect=AssertionError('must not call CLI')):
+            result=rt.peer(self.root,args,rt.api(gm.__dict__))
+        self.assertTrue(result['passed']);self.assertEqual(self.state()['tasks']['T1']['status'],'approved')
+        self.assertIn('atomic',self.state()['runs'])
+
+    def test_failed_verification_keeps_defects_blocking(self):
+        self.submit(); self.peer('bad', 'changes')
+        self.apply(dict(id='fix-plan',op='remediate',actor='codex:a',task='T1',notices=['bad-finding-0'],scope=['app.py'],evidence='Correct defect'))
+        with patch.dict(os.environ,{'PATH':str(self.bin)+os.pathsep+os.environ['PATH'],'GM_FIXTURE_MODE':'changes'}):
+            cli(self.root,'peer','--task','T1','--actor','codex:a','--to','claude-code','--kind','verify','--id','still-bad')
+        state=self.state()
+        self.assertNotEqual(state['notices']['bad-finding-0']['status'],'resolved')
+        self.assertTrue(gm.blockers(state,'T1'))
+        self.assertIsNone(state['tasks']['T1']['review'])
+        self.assertNotEqual(cli(self.root,'guard','--task','T1','--actor','codex:a','app.py',ok=False).returncode,0)
+
+    def test_check_detects_two_equally_stale_copies(self):
+        for name in ('.agents/skills/gridmatrix', '.claude/skills/gridmatrix'):
+            path=self.root/name/'scripts/gm_runtime.py'
+            path.write_text(path.read_text()+'\n# stale copied runtime\n')
+        result=cli(self.root,'check',ok=False)
+        self.assertNotEqual(result.returncode,0)
+        self.assertIn('differ from running skill',result.stderr)
+        doctor=json.loads(cli(self.root,'doctor').stdout)
+        self.assertFalse(doctor['installation']['copies']['.agents/skills/gridmatrix']['matches_running_skill'])
 
     def test_run_output_limit_and_timeout(self):
         output=rt.run_process([sys.executable,'-c','print("x"*100000)'],self.root,self.base/'out',2,cap=1024)

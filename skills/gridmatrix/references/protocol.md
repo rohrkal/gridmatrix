@@ -166,3 +166,11 @@ Runtime-only capture/integration events are written by the runner; ordinary
 `apply` cannot manufacture a capture by supplying report fields. Operator recovery
 requires a separate explicit CLI flag and records the authorization statement.
 These are cooperative controls, not a security boundary against arbitrary code.
+
+`remediate`: task, notices (all current blocking IDs), scope (within task scope),
+evidence. Only the owner in the claimed building worktree can record this plan.
+Approval stays blocked until independent resolution. See execution.md.
+
+`peer-complete` is runtime-only: it atomically validates and publishes the peer's
+findings, optional remediation resolution, review and completed execution record.
+A stale or invalid transaction publishes none of these changes.

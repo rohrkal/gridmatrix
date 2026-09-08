@@ -49,7 +49,10 @@ and installs the complete skill under `.agents/skills/gridmatrix` and
 symlink destinations. Its managed skill files are replaced on update; maintain
 project customizations outside those files. Rerun from an updated upstream skill
 copy to update both project copies. Old extra custom files are not removed;
-`check` catches divergence between copies.
+`check` catches divergence between copies and differences from the running skill
+for its instructions, references and runtime files. Use the intended updated
+upstream script when checking freshness; an old script cannot discover a newer
+release by itself.
 
 Fill PROJECT.md from the current request, manifests, lockfiles and code. Inspect
 scripts before executing them. Record applicable commands and actual results,
@@ -94,3 +97,11 @@ Recovery, bounded execution and optional integrations are documented in
 a lost actor's identity. A GitHub connector alone does not provide a local Git
 transport; both execution environments need access to the configured coordinator.
 No skill grants credentials or installs the peer CLI automatically.
+
+## Updating v2.1.0 to v2.1.1
+
+Update both project copies using init from the updated installed or repository skill,
+then commit the reviewed changes. Ledger schema remains 3; no state migration is
+needed. Quiesce peer runs while updating. Existing orphan runs remain recoverable.
+Use a new request ID for a new submission; reusing an identical old ID replays the
+old request and does not start a new lifecycle step.

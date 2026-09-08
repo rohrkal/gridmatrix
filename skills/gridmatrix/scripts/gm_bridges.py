@@ -55,7 +55,7 @@ def hooks(root, install, g):
 def serve(root, who, g):
     g.actor(who)
     aliases = {'claim_task': 'claim', 'report_defect': 'notice', 'submit_review': 'review', 'transact': None}
-    allowed = {'claim', 'submit', 'review', 'notice', 'ack', 'resolve', 'dispute', 'learn', 'confirm', 'retire', 'measure', 'lesson-outcome'}
+    allowed = {'claim', 'submit', 'review', 'notice', 'ack', 'resolve', 'dispute', 'learn', 'confirm', 'retire', 'measure', 'lesson-outcome', 'remediate'}
     initialized = False
     for line in sys.stdin:
         request = None

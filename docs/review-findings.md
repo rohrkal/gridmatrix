@@ -1,5 +1,31 @@
 # Gridmatrix review
 
+## v2.1.1 — reliability corrections
+
+Fixed four reproduced defects from the follow-up review:
+
+| Defect | Correction |
+| --- | --- |
+| Serious findings also blocked their own guarded fix | Owner records exact notices and limited remediation scope; peer verification resolves defects while ordinary review remains required |
+| A failed final ledger write could leave approval without a completed run | One atomic peer-complete transaction publishes findings, verdict and execution; local completion records support publication retry without another model call |
+| Recovered owners could not clear predecessor orphan runs | Explicitly authorized recovered owner can cancel the abandoned run, retaining both identities and counting the attempt |
+| Repeating a successful peer request failed after task approval | Matching completed requests replay before new-run state validation; changed inputs still fail |
+
+Diagnostics now detect equally outdated project copies against the running skill.
+Doctor reports missing CLI versus unverified execution and shows historical run
+observations separately; it never infers current credentials from old success.
+
+Validation: 44 automated tests, including scoped correction with a real source
+commit, rejection of collision bypass, failed-verification blockers, recovery,
+replay and injected completion-publication failure. The tests use controlled
+subprocess fixtures for platform responses. A fresh independent agent pass was
+attempted but stopped at the platform usage limit; it supplied no validation result.
+Authenticated live Claude/Codex runs remain unvalidated in this environment.
+
+Update both project skill copies using init from v2.1.1. Schema remains 3.
+The release does not add hosted artifact sharing or automatic role optimization;
+those were improvement proposals, not the reproduced reliability defects.
+
 ## v2.1 — 2026-09-08
 
 The v2.0 protocol prevented ledger collisions, but left execution, integration
