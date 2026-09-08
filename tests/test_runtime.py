@@ -32,7 +32,9 @@ if mode=='timeout': time.sleep(30)
 if 'app-server' in sys.argv:
  for line in sys.stdin:
   msg=json.loads(line); method=msg.get('method')
-  if method=='initialize': payload={'id':msg['id'],'result':{}}
+  if method=='initialize':
+   assert msg['params']['clientInfo']=={'name':'gridmatrix','version':'2.2.0'}
+   payload={'id':msg['id'],'result':{}}
   elif method in ('thread/start','thread/resume'):
    assert msg['params']['approvalPolicy']=='never'
    assert msg['params']['sandbox']=='read-only'
@@ -171,6 +173,8 @@ class RuntimeTests(unittest.TestCase):
     def test_doctor_does_not_infer_authentication(self):
         with patch.dict(os.environ, {'PATH': str(self.bin) + os.pathsep + os.environ['PATH']}):
             d = json.loads(self.env_cli('doctor').stdout)
+        self.assertEqual(d['gridmatrix'], '2.2.0')
+        self.assertEqual(json.loads((self.root / '.gridmatrix/config.json').read_text())['version'], '2.2.0')
         self.assertTrue(d['platforms']['codex']['installed'])
         self.assertEqual(d['platforms']['codex']['authentication'], 'unverified')
         self.assertIsNone(d['live_pair_ready'])
