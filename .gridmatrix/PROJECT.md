@@ -83,11 +83,17 @@ Assign by demonstrated evidence from this project, not platform stereotype.
 - **Codex:** runtime recovery and handoff (T-007), development documentation (T-009),
   integration-target advancement and publication.
 - **Claude Code:** Windows portability (T-001, T-004), plugin packaging and CI (T-006),
-  instruction text (T-012), and this project agreement.
+  the instruction and reference text, and this project agreement.
+
+Cite a task ID here only once it is done or approved. In-flight IDs go stale as soon
+as a record is cancelled and re-claimed, which happened four times in this session.
 
 Review outcomes so far: T-001 `changes` then fixed; T-005 `changes` on an S1 version pin
 and an S2 manifest field, cancelled and re-claimed as T-006 because no operation can amend
 acceptance criteria, then `pass`; T-007 `changes` on an actor-filtering gap, then `pass`.
+Four records were cancelled and re-claimed for defects that could not be corrected in
+place. A guarded `refresh-base` now covers the stale-base half of that; wrong acceptance
+criteria still cannot be amended, so those still require cancel-and-reclaim.
 
 Escaped defects, recorded accurately rather than flatteringly: Codex caught three Claude
 Code errors — a one-step install claim that the documented flow does not provide, a
