@@ -76,7 +76,7 @@ def serve(root, who, g):
                 result = {}
             elif method == 'tools/list':
                 g.require(initialized, 'initialize first')
-                result = {'tools': [{'name': 'read_inbox', 'description': 'Read current tasks, notices and lessons without builder rationale.',
+                result = {'tools': [{'name': 'read_inbox', 'description': 'Read only work currently actionable for this bound actor, without builder rationale.',
                                      'inputSchema': {'type': 'object', 'properties': {}, 'additionalProperties': False}},
                                     *[{'name': name, 'description': 'Apply a Gridmatrix ' + (op or 'allowed protocol') + ' request. Actor is fixed by server configuration.',
                                        'inputSchema': {'type': 'object', 'properties': {'request': {'type': 'object'}}, 'required': ['request'], 'additionalProperties': False}}
@@ -86,7 +86,7 @@ def serve(root, who, g):
                 name = params.get('name'); arguments = params.get('arguments') or {}
                 try:
                     if name == 'read_inbox':
-                        value = invoke(root, ['status'], None, g)
+                        value = invoke(root, ['next', '--actor', who], None, g)
                     else:
                         g.require(name in aliases, 'unknown tool')
                         body = dict(arguments['request']); body['actor'] = who

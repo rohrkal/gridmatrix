@@ -388,6 +388,71 @@ class Ledger:
         require(state.get('schema') in (2, 3), 'unsupported ledger schema')
         return head, state
 
+    def repair_legacy_cr_name(self, who):
+        """Repair only the historical Windows ``ledger.json\r`` tree defect."""
+        actor(who)
+        tempref = None
+        if not self.remote:
+            p = git(self.root, 'rev-parse', '--verify', self.ref, check=False)
+            head = p.stdout.strip() if not p.returncode else None
+        else:
+            p = git(self.root, 'ls-remote', '--exit-code', self.remote, self.ref, check=False)
+            require(p.returncode in (0, 2), 'coordination remote unavailable; repair refused')
+            head = p.stdout.split()[0] if p.returncode == 0 else None
+            if head:
+                tempref = 'refs/gridmatrix/repair/' + uuid.uuid4().hex
+                git(self.root, 'fetch', '--no-tags', '--no-write-fetch-head', self.remote,
+                    self.ref + ':' + tempref)
+                fetched = git(self.root, 'rev-parse', tempref).stdout.strip()
+                if fetched != head:
+                    git(self.root, 'update-ref', '-d', tempref, check=False)
+                    tempref = None
+                    require(False, 'coordination ref changed during repair; retry from fresh state')
+        require(head, 'coordination ref does not exist; nothing to repair')
+        try:
+            healthy = git(self.root, 'show', head + ':ledger.json', check=False)
+            if healthy.returncode == 0:
+                state = json.loads(healthy.stdout)
+                self._validate_state_shape(state)
+                return {'status': 'already-healthy', 'commit': head, 'ref': self.ref,
+                        'transport': self.remote or 'local-only'}
+
+            listing = git(self.root, 'ls-tree', '-z', head).stdout.split('\0')
+            entries = [entry for entry in listing if entry]
+            require(len(entries) == 1, 'repair refused: coordination tree is not the exact legacy one-entry shape')
+            match = re.fullmatch(r'100644 blob ([0-9a-f]{40,64})\tledger\.json\r', entries[0])
+            require(match, 'repair refused: expected the exact legacy ledger.json carriage-return entry')
+            blob = match.group(1)
+            raw = git(self.root, 'cat-file', 'blob', blob).stdout
+            state = json.loads(raw)
+            self._validate_state_shape(state)
+            tree = git(self.root, 'mktree', data=f'100644 blob {blob}\tledger.json\n').stdout.strip()
+            commit = git(self.root, '-c', 'user.name=Gridmatrix', '-c', 'user.email=gridmatrix@localhost',
+                         'commit-tree', tree, '-p', head,
+                         data=f'gridmatrix: repair legacy ledger filename ({who})\n').stdout.strip()
+            if self.remote:
+                result = git(self.root, 'push', '--porcelain', self.remote, commit + ':' + self.ref, check=False)
+            else:
+                result = git(self.root, 'update-ref', self.ref, commit, head, check=False)
+            require(result.returncode == 0,
+                    'coordination ref changed during repair; no force was used, retry from fresh state')
+            return {'status': 'repaired', 'previous': head, 'commit': commit, 'ref': self.ref,
+                    'transport': self.remote or 'local-only'}
+        finally:
+            if tempref:
+                git(self.root, 'update-ref', '-d', tempref, check=False)
+
+    @staticmethod
+    def _validate_state_shape(state):
+        require(isinstance(state, dict) and state.get('schema') in (2, 3),
+                'repair refused: legacy blob is not a supported Gridmatrix ledger')
+        required_maps = ('tasks', 'notices', 'lessons', 'receipts')
+        require(all(isinstance(state.get(key), dict) for key in required_maps),
+                'repair refused: legacy ledger shape is incomplete')
+        if state['schema'] == 3:
+            require(isinstance(state.get('runs'), dict),
+                    'repair refused: schema 3 ledger is missing runs')
+
     def apply(self, request, context):
         for _ in range(3):
             parent, state = self.load()
@@ -501,7 +566,7 @@ def main(argv=None):
     import gm_runtime
     if gm_runtime.dispatch(argv, globals()):
         return
-    p = argparse.ArgumentParser(description=__doc__, epilog='Execution commands: doctor, upgrade, evidence, peer, integrate, guard, metrics, hook, mcp. Use COMMAND --help for options.')
+    p = argparse.ArgumentParser(description=__doc__, epilog='Execution commands: doctor, upgrade, evidence, peer, integrate, guard, metrics, next, watch, hook, mcp. Use COMMAND --help for options.')
     p.add_argument('--repo', default='.', help='project path (spaces supported)')
     sub = p.add_subparsers(dest='command', required=True)
     ini = sub.add_parser('init', help='install/update skill and preserve project instructions')
@@ -516,6 +581,8 @@ def main(argv=None):
     apply.add_argument('file', help='JSON request file; - reads stdin')
     check = sub.add_parser('check', help='check installation or exact task approval; does not run project tests')
     check.add_argument('--task')
+    repair = sub.add_parser('repair-ledger', help='repair only the legacy Windows ledger.json carriage-return defect')
+    repair.add_argument('--actor', required=True)
     apply.add_argument('--authorize-recovery', action='store_true')
     args = p.parse_args(argv)
     if args.command == 'session':
@@ -524,6 +591,8 @@ def main(argv=None):
     if args.command == 'init':
         install(root, args.remote, args.dry_run); return
     ledger = Ledger(root)
+    if args.command == 'repair-ledger':
+        print(dumps(ledger.repair_legacy_cr_name(args.actor)), end=''); return
     ctx = context_at(root)
     if args.command == 'apply':
         r = json.load(sys.stdin) if args.file == '-' else json.loads(Path(args.file).read_text(encoding='utf-8'))

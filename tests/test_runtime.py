@@ -21,9 +21,11 @@ if '--version' in sys.argv:
 if '--help' in sys.argv:
  print('--output-schema --sandbox --output-last-message --json-schema --output-format --tools --max-turns --max-budget-usd --strict-mcp-config'); sys.exit(0)
 mode=os.environ.get('GM_FIXTURE_MODE','pass')
-result={'verdict':'pass','findings':[],'summary':'Fixture inspected source','limits':'Synthetic fixture; no live model'}
+result={'verdict':'pass','findings':[],'summary':'Fixture inspected source','limits':'Synthetic fixture; no live model','inspected':['app.py and submitted diff']}
 if mode=='changes':
  result.update(verdict='changes',findings=[dict(severity='S1',location='app.py:1',problem='Fixture defect',evidence='Controlled reproduction')])
+if mode=='changes-empty': result.update(verdict='changes',findings=[])
+if mode=='no-inspection': result.pop('inspected')
 if mode=='bad-json': result={'unexpected':True}
 if mode=='failure': sys.exit(7)
 if mode=='timeout': time.sleep(30)
@@ -129,6 +131,87 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(self.state()['tasks']['T1']['status'], 'review')
             self.assertFalse(self.state()['runs'][rid]['passed'])
         self.assertIn('budget', self.peer('fourth').stderr)
+
+    def test_peer_requires_inspection_and_actionable_changes(self):
+        self.submit()
+        for rid, mode in [('empty-changes', 'changes-empty'), ('blind-pass', 'no-inspection')]:
+            result = self.peer(rid, mode)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(self.state()['tasks']['T1']['status'], 'review')
+            runs = self.state()['runs']
+            self.assertIn(rid, runs, result.stderr + repr(runs))
+            self.assertFalse(runs[rid]['passed'])
+
+    def test_next_filters_to_actionable_actor_work(self):
+        self.assertEqual(json.loads(cli(self.root, 'next', '--actor', 'codex:a').stdout)['items'], [])
+        cold = json.loads(cli(self.root, 'next', '--actor', 'codex:new-session').stdout)['items']
+        self.assertEqual(cold[0]['action'], 'inspect-owner-or-authorized-recovery')
+        self.assertEqual(cold[0]['owner'], 'codex:a')
+        self.submit()
+        reviewer = json.loads(cli(self.root, 'next', '--actor', 'claude-code:b').stdout)['items']
+        self.assertEqual([(item['task'], item['action']) for item in reviewer], [('T1', 'review-exact-head')])
+        self.assertEqual(json.loads(cli(self.root, 'next', '--actor', 'codex:a').stdout)['items'], [])
+        self.apply(dict(id='question', op='notice', actor='claude-code:b', task='T1', to='codex',
+                        kind='QUESTION', severity='S2', summary='Need owner input', evidence='Observed ambiguity'))
+        owner = json.loads(cli(self.root, 'next', '--actor', 'codex:a').stdout)['items']
+        self.assertEqual(owner[0]['key'], 'notice:question')
+        self.apply(dict(id='reported-defect', op='notice', actor='codex:a', task='T1',
+                        to='claude-code', kind='DEFECT', severity='S1', summary='Must verify fix',
+                        evidence='Controlled defect'))
+        self.apply(dict(id='author-ack', op='ack', actor='claude-code:b',
+                        notice='reported-defect', evidence='Mechanical fix applied'))
+        owner = json.loads(cli(self.root, 'next', '--actor', 'codex:a').stdout)['items']
+        actions = {item['key']: item['action'] for item in owner}
+        self.assertEqual(actions['verify-notice:reported-defect:acknowledged'],
+                         'verify-or-resolve-reported-blocker')
+
+    def test_watch_baselines_existing_and_wakes_for_new_review(self):
+        process = subprocess.Popen(
+            [sys.executable, str(SCRIPT), '--repo', str(self.root), 'watch', '--actor',
+             'claude-code:b', '--timeout', '5', '--poll', '0.1'],
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        import time
+        time.sleep(0.25)
+        self.submit()
+        stdout, stderr = process.communicate(timeout=6)
+        self.assertEqual(process.returncode, 0, stderr)
+        result = json.loads(stdout)
+        self.assertEqual(result['status'], 'actionable')
+        self.assertEqual(result['items'][0]['action'], 'review-exact-head')
+
+    def test_watch_wakes_when_integration_target_moves_to_tested_tree(self):
+        (self.root / 'app.py').write_text('answer = 6 * 7\n')
+        run(self.root, 'add', 'app.py'); run(self.root, 'commit', '-m', 'task change')
+        self.head = run(self.root, 'rev-parse', 'HEAD')
+        self.submit(); reviewed = self.peer()
+        self.assertEqual(reviewed.returncode, 0, reviewed.stderr + reviewed.stdout)
+        cli(self.root, 'integrate', '--task', 'T1', '--actor', 'codex:a', '--id',
+            'watch-integration', '--target', 'refs/heads/main', '--commands', str(self.commands))
+        before = json.loads(cli(self.root, 'next', '--actor', 'codex:a').stdout)['items']
+        self.assertEqual(before[0]['action'], 'advance-integration-target', repr(before))
+        target = run(self.root, 'rev-parse', 'refs/heads/main')
+        target_tree = run(self.root, 'rev-parse', 'refs/heads/main^{tree}')
+        drift = gm.git(self.root, 'commit-tree', target_tree, '-p', target,
+                       data='unrelated target drift\n').stdout.strip()
+        run(self.root, 'update-ref', 'refs/heads/main', drift, target)
+        drifted = json.loads(cli(self.root, 'next', '--actor', 'codex:a').stdout)['items']
+        self.assertEqual(drifted[0]['action'], 'rerun-integration-candidate', repr(drifted))
+        run(self.root, 'update-ref', 'refs/heads/main', target, drift)
+        process = subprocess.Popen(
+            [sys.executable, str(SCRIPT), '--repo', str(self.root), 'watch', '--actor',
+             'codex:a', '--timeout', '5', '--poll', '0.1'],
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        import time
+        time.sleep(1.0)
+        run(self.root, 'update-ref', 'refs/heads/main', self.head)
+        after = json.loads(cli(self.root, 'next', '--actor', 'codex:a').stdout)['items']
+        self.assertEqual(after[0]['action'], 'finish-integrated-task', repr(after))
+        stdout, stderr = process.communicate(timeout=6)
+        self.assertEqual(process.returncode, 0, stderr)
+        result = json.loads(stdout)
+        self.assertEqual(result['status'], 'actionable', repr(result))
+        self.assertEqual(result['items'][0]['action'], 'finish-integrated-task')
+        self.assertEqual(result['items'][0]['integrated_commit'], self.head)
 
     def test_peer_changes_create_blocking_notice(self):
         self.submit(); result = self.peer(mode='changes')
