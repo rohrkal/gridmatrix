@@ -10,12 +10,12 @@ Make the Gridmatrix bundle genuinely plug and play, and keep it free of bloat.
 
 Plug and play means the NEXT project to adopt Gridmatrix must not repeat the repair work
 done here. It does not mean convenience: on 2026-09-08, upstream `main` (1773a73) was
-reproduced silently bricking a fresh Windows project. `init` exited 0, `check` failed with
-a confusing message, the first `claim` reported `"status": "recorded"`, and the tree entry
-was stored as `ledger.json
-`. Every later read and write then failed with "coordination
-ref exists but is not a Gridmatrix ledger; do not overwrite it", which instructs the user
-not to repair it. One operation, then a dead ledger with no in-tool recovery.
+reproduced silently bricking a fresh Windows project. `init` exited 0, `check` failed
+with a confusing message, the first `claim` reported `"status": "recorded"`, and the
+tree entry was stored under a name ending in a carriage return: `ledger.json` followed
+by CR. Every later read and write then failed with "coordination ref exists but is not a
+Gridmatrix ledger; do not overwrite it", which instructs the user not to repair it. One
+operation, then a dead ledger with no in-tool recovery.
 
 No bloat means the bundle should be what two agents need to work as a team under a clear
 ruleset, and no more. A ruleset neither agent can hold in working memory is not a clear
@@ -43,8 +43,8 @@ methodology.
 ## Inherited instruction sources
 
 `AGENTS.md` managed block, `CLAUDE.md` (imports `@AGENTS.md`), and
-`docs/skill-development.md` (canonical-source versus generated-snapshot ownership, T-002,
-Codex-owned). Preserve all three; they were not authored by this collaboration alone.
+`docs/skill-development.md` (canonical-source versus generated-snapshot ownership,
+T-009, Codex-owned). Preserve all three; they were not authored by this collaboration alone.
 
 ## Commands and baseline
 
@@ -80,10 +80,10 @@ any work as shipped. Publication is Codex-owned under user authorisation.
 
 Assign by demonstrated evidence from this project, not platform stereotype.
 
-- **Codex:** runtime recovery and handoff (T-007), development documentation (T-002),
+- **Codex:** runtime recovery and handoff (T-007), development documentation (T-009),
   integration-target advancement and publication.
 - **Claude Code:** Windows portability (T-001, T-004), plugin packaging and CI (T-006),
-  instruction text (T-008 and the reference batch).
+  instruction text (T-012), and this project agreement.
 
 Review outcomes so far: T-001 `changes` then fixed; T-005 `changes` on an S1 version pin
 and an S2 manifest field, cancelled and re-claimed as T-006 because no operation can amend
