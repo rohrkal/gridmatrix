@@ -1,8 +1,7 @@
 {
   "name": "gridmatrix",
   "owner": {
-    "name": "rohrkal",
-    "url": "https://github.com/rohrkal"
+    "name": "rohrkal"
   },
   "description": "Gridmatrix: a shared working protocol for Claude Code and Codex on the same project.",
   "plugins": [
