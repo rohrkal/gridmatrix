@@ -3,6 +3,9 @@
 Use the gridmatrix skill for coordinated project work. Read .gridmatrix/PROJECT.md
 and run `python3 .agents/skills/gridmatrix/scripts/gridmatrix.py status` at session
 start, after compaction, before each edit batch, and before handoff/integration.
+Substitute `python` where no `python3` launcher exists: on a default Windows
+install `python3` resolves to a Microsoft Store alias stub that exits without
+running, so a command written with it silently does nothing.
 Claim a task before editing; use one writer per task and separate working trees.
 Immediately record material mistakes, overlap, and changed assumptions as notices;
 acknowledge notices addressed to you. Pause affected work on unresolved blockers.
