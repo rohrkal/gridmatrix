@@ -62,6 +62,17 @@ such as Windows line endings. Report skips, fixture limitations and baseline
 failures separately from verified passes. Controlled peer fixtures do not prove
 live model execution or authentication.
 
+Exercise the cold-start surface with a different session suffix before claiming a
+handoff change works. `next --actor PLATFORM:NEW_SESSION` must expose same-platform
+work under its existing owner as recovery information without granting ownership.
+For watcher changes, cover both a new ledger action and movement of a tested
+integration target. Waiting must happen in the subprocess; repeated model turns
+are not a watcher.
+
+Peer fixtures must return a nonempty `inspected` list. A successful process with
+no inspected evidence is intentionally invalid, as is a `changes` verdict without
+an actionable finding. Keep those execution and review outcomes distinct.
+
 `check` establishes installation consistency, not behavioral correctness. After
 committing owned source and snapshot changes, capture the appropriate checks with
 `evidence`, submit that exact head, and have the other platform review it in a
@@ -71,4 +82,5 @@ formats and capture/integration commands.
 
 A local snapshot refresh is not a release or a personal-skill update. State which
 commit was reviewed, which target was integrated, and which installations were
-actually updated.
+actually updated. Before publishing, compare the final target tree with the tested
+candidate, push the reviewed integration target, and inspect the remote CI result.
