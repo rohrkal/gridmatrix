@@ -424,11 +424,23 @@ def safe_target(root, path):
             break
         require(not p.is_symlink(), f'refusing symlink target: {p}')
 
+def read_preserving(path):
+    # newline='' keeps the file's own line endings, so rewriting an inherited
+    # AGENTS.md edits the managed block and not every other line in the file.
+    with open(path, encoding='utf-8', newline='') as f:
+        return f.read()
+
 def write_atomic(path, content):
+    # Accepts bytes or str. Callers copying managed skill files must pass bytes so
+    # the copy reproduces its source exactly, because check() and
+    # installation_freshness() compare with read_bytes(); str is encoded as UTF-8
+    # without newline translation, matching how these files are read back.
+    if isinstance(content, str):
+        content = content.encode('utf-8')
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, name = tempfile.mkstemp(prefix='.gridmatrix-', dir=path.parent)
     try:
-        with os.fdopen(fd, 'w', encoding='utf-8', newline='') as f:
+        with os.fdopen(fd, 'wb') as f:
             f.write(content)
         os.replace(name, path)
     finally:
@@ -448,30 +460,30 @@ def install(root, remote, dry):
         config = {'schema': 3, 'version': VERSION, 'remote': remote, 'branch': 'gridmatrix-state'}
     if remote:
         require(remote in git(root, 'remote').stdout.splitlines(), 'remote does not exist')
-    files = {configpath: dumps(config)}
+    files = {configpath: dumps(config).encode('utf-8')}
     for name in ('AGENTS.md', 'CLAUDE.md'):
         p = root / name; safe_target(root, p)
-        old = p.read_text(encoding='utf-8') if p.exists() else ''
+        old = read_preserving(p) if p.exists() else ''
         if name == 'AGENTS.md':
-            files[p] = managed(old)
+            files[p] = managed(old).encode('utf-8')
         else:
-            files[p] = old if '@AGENTS.md' in old.splitlines() else '@AGENTS.md\n\n' + old
+            files[p] = (old if '@AGENTS.md' in old.splitlines() else '@AGENTS.md\n\n' + old).encode('utf-8')
     project = root / '.gridmatrix/PROJECT.md'
     if not project.exists():
-        files[project] = '# Project agreement\n\nRecord the user objective, constraints, inherited instruction sources, verified commands\n(with date/result), baseline failures, and intended integration branch here.\nUnknown facts remain explicitly unknown; initialization does not verify the project.\n\n## Objective\nUnknown until adoption reads the user request.\n\n## Commands and baseline\nNot yet inspected.\n\n## Role calibration\nChoose builder by relevant project experience, tools and availability. The other\nplatform reviews. Record task class, outcomes, escaped defects and review rounds;\nuse comparable evidence, not permanent platform stereotypes.\n'
+        files[project] = '# Project agreement\n\nRecord the user objective, constraints, inherited instruction sources, verified commands\n(with date/result), baseline failures, and intended integration branch here.\nUnknown facts remain explicitly unknown; initialization does not verify the project.\n\n## Objective\nUnknown until adoption reads the user request.\n\n## Commands and baseline\nNot yet inspected.\n\n## Role calibration\nChoose builder by relevant project experience, tools and availability. The other\nplatform reviews. Record task class, outcomes, escaped defects and review rounds;\nuse comparable evidence, not permanent platform stereotypes.\n'.encode('utf-8')
     for dest in (root / '.agents/skills/gridmatrix', root / '.claude/skills/gridmatrix'):
         for src in source.rglob('*'):
             if src.is_file() and '__pycache__' not in src.parts and src.suffix != '.pyc':
-                files[dest / src.relative_to(source)] = src.read_text(encoding='utf-8')
+                files[dest / src.relative_to(source)] = src.read_bytes()
     # Preflight every target before any write, including partially installed projects.
     for p in files:
         safe_target(root, p)
-    for p, text in files.items():
-        if p.exists() and p.read_text(encoding='utf-8') == text:
+    for p, blob in files.items():
+        if p.exists() and p.read_bytes() == blob:
             continue
         print(('would write ' if dry else 'write ') + str(p.relative_to(root)))
         if not dry:
-            write_atomic(p, text)
+            write_atomic(p, blob)
     print('transport: ' + ('remote ' + config['remote'] if config['remote'] else 'local worktrees only'))
 
 def context_at(root):

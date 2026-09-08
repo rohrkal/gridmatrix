@@ -1,6 +1,7 @@
 import concurrent.futures
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -27,6 +28,25 @@ def repo(path):
     run(path, 'config', 'user.email', 'test@localhost')
     (path / 'app.py').write_text('answer = 42\n')
     run(path, 'add', 'app.py'); run(path, 'commit', '-m', 'baseline')
+    return path
+
+
+def write_fixture_cli(bindir, name, source):
+    """Install a fake CLI that shutil.which() finds and subprocess runs directly.
+
+    POSIX uses the shebang plus the executable bit. Windows honours neither, so an
+    extensionless script is invisible to shutil.which(): it matches only PATHEXT
+    entries. A .cmd shim is both discoverable and executable by CreateProcess
+    without a shell, which keeps the fixtures identical on both platforms.
+    """
+    if os.name == 'nt':
+        (bindir / (name + '.py')).write_text(source, encoding='utf-8')
+        (bindir / (name + '.cmd')).write_text(
+            '@echo off\r\n"{}" "%~dp0{}.py" %*\r\n'.format(sys.executable, name), encoding='utf-8')
+        return bindir / (name + '.cmd')
+    path = bindir / name
+    path.write_text(source, encoding='utf-8')
+    path.chmod(0o755)
     return path
 
 
@@ -162,7 +182,13 @@ class GitTests(unittest.TestCase):
 
     def test_symlink_target_refused(self):
         outside = self.base / 'outside'; outside.mkdir()
-        (self.root / '.claude').symlink_to(outside, target_is_directory=True)
+        try:
+            (self.root / '.claude').symlink_to(outside, target_is_directory=True)
+        except OSError as exc:
+            # Windows needs SeCreateSymbolicLinkPrivilege (Developer Mode or admin).
+            # The refusal path itself is platform-independent; only creating the
+            # symlink to test it is gated, so skip explicitly rather than fail.
+            raise unittest.SkipTest('cannot create symlink in this environment: ' + str(exc))
         self.assertNotEqual(cli(self.root, 'init', ok=False).returncode, 0)
         self.assertEqual(list(outside.iterdir()), [])
         self.assertFalse((self.root / '.gridmatrix').exists())
@@ -247,6 +273,73 @@ class GitTests(unittest.TestCase):
         run(self.root, 'update-ref', 'refs/heads/main', head)
         cli(self.root, 'apply', '-', data=json.dumps(dict(id='finish', op='finish', actor='codex:a', task='T1', head=head, integrated_commit=head, evidence='accepted at head')))
         self.assertEqual(json.loads(cli(self.root, 'status').stdout)['state']['tasks'], {})
+
+class PortabilityTests(unittest.TestCase):
+    """Regressions for defects that only appear off a POSIX/UTF-8 locale machine.
+
+    Requested by Codex in notice-review-plan-3608: cover Unicode inherited
+    instructions and the literal ledger blob name, not just ASCII fixtures.
+    """
+
+    def setUp(self):
+        self.base = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: None)
+        self.root = repo(self.base / 'project')
+
+    def test_ledger_blob_is_named_ledger_json_exactly(self):
+        # git mktree takes the entry name up to the newline. Passing its stdin in
+        # text mode on Windows appended CR, storing the blob as "ledger.json\r" so
+        # every later read failed with "not a Gridmatrix ledger".
+        cli(self.root, 'init')
+        run(self.root, 'add', '-A'); run(self.root, 'commit', '-m', 'gridmatrix setup')
+        head = run(self.root, 'rev-parse', 'HEAD')
+        c = claim(); c['base'] = head
+        cli(self.root, 'apply', '-', data=json.dumps(c))
+        ref = run(self.root, 'rev-parse', 'refs/gridmatrix/state')
+        names = run(self.root, 'ls-tree', '--name-only', ref).splitlines()
+        self.assertEqual(names, ['ledger.json'])
+        for name in names:
+            self.assertNotIn('\r', name)
+        # The ledger must also be readable back through the normal path.
+        self.assertIn('T1', json.loads(cli(self.root, 'status').stdout)['state']['tasks'])
+
+    def test_unicode_inherited_instructions_survive_install(self):
+        # Reads once used the locale encoding while writes used UTF-8, so on a
+        # cp1252 console non-ASCII text was silently re-encoded into mojibake.
+        text = '# Réglages\n\nUtilise « — » et →, díaz, 日本語.\n'
+        (self.root / 'AGENTS.md').write_text(text, encoding='utf-8')
+        cli(self.root, 'init')
+        after = (self.root / 'AGENTS.md').read_text(encoding='utf-8')
+        self.assertIn('Utilise « — » et →, díaz, 日本語.', after)
+        self.assertIn(gm.BEGIN, after)
+        cli(self.root, 'check')
+
+    def test_installed_copies_match_source_byte_for_byte(self):
+        # check() and installation_freshness() compare with read_bytes(), so the
+        # installer must reproduce bytes rather than decoded-and-re-encoded text.
+        cli(self.root, 'init')
+        source = SCRIPT.resolve().parents[1]
+        checked = 0
+        for src in source.rglob('*'):
+            if src.is_file() and '__pycache__' not in src.parts and src.suffix != '.pyc':
+                for dest in ('.agents/skills/gridmatrix', '.claude/skills/gridmatrix'):
+                    target = self.root / dest / src.relative_to(source)
+                    self.assertTrue(target.is_file(), 'missing copy: ' + str(target))
+                    self.assertEqual(target.read_bytes(), src.read_bytes(),
+                                     'installed copy differs from source: ' + str(src))
+                    checked += 1
+        self.assertGreater(checked, 0)
+
+    def test_install_copies_non_utf8_asset_without_corruption(self):
+        # rglob copies every file, so one binary asset must not break init.
+        source = SCRIPT.resolve().parents[1]
+        asset = source / 'assets' / 'portability_probe.bin'
+        blob = bytes([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) + bytes(range(256))
+        asset.write_bytes(blob)
+        self.addCleanup(asset.unlink)
+        cli(self.root, 'init')
+        for dest in ('.agents/skills/gridmatrix', '.claude/skills/gridmatrix'):
+            self.assertEqual((self.root / dest / 'assets' / 'portability_probe.bin').read_bytes(), blob)
 
 if __name__ == '__main__':
     unittest.main()

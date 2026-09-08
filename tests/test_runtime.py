@@ -7,7 +7,7 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
-from test_gridmatrix import SCRIPT, cli, run, repo, claim, gm
+from test_gridmatrix import SCRIPT, cli, run, repo, claim, gm, write_fixture_cli
 
 sys.path.insert(0, str(SCRIPT.parent))
 import gm_runtime as rt
@@ -69,7 +69,7 @@ class RuntimeTests(unittest.TestCase):
         self.commands.write_text(json.dumps([[sys.executable, '-c', 'print("checked")']]))
         self.bin = self.base / 'bin'; self.bin.mkdir()
         for name in ['codex', 'claude']:
-            p = self.bin / name; p.write_text(FAKE); p.chmod(0o755)
+            write_fixture_cli(self.bin, name, FAKE)
 
     def apply(self, value, ok=True, authorize=False):
         return cli(self.root, 'apply', *(['--authorize-recovery'] if authorize else []), '-', data=json.dumps(value), ok=ok)
@@ -167,6 +167,10 @@ class RuntimeTests(unittest.TestCase):
         cli(self.root, 'guard', '--task', 'T1', '--actor', 'codex:a', 'app.py')
         self.assertNotEqual(cli(self.root, 'guard', '--task', 'T1', '--actor', 'codex:a', 'other.py', ok=False).returncode, 0)
 
+    @unittest.skipUnless(os.name == 'posix',
+                         'hook --install deliberately refuses non-POSIX shells (gm_bridges.hooks); '
+                         'the documented Windows path is manual configuration, so there is no '
+                         'auto-install behaviour to assert here')
     def test_hooks_preserve_permissions_and_existing_settings(self):
         config = self.root / '.claude/settings.json'
         config.write_text(json.dumps({'permissions': {'deny': ['Read(secrets)']}, 'hooks': {'Stop': []}}))
@@ -274,9 +278,9 @@ class RuntimeTests(unittest.TestCase):
 
     def test_appserver_stderr_only_is_bounded(self):
         import gm_appserver
-        binary = self.bin / 'noisy'
-        binary.write_text('#!/usr/bin/env python3\nimport sys,time\nsys.stderr.write("x"*5000000);sys.stderr.flush();time.sleep(10)\n')
-        binary.chmod(0o755)
+        binary = write_fixture_cli(
+            self.bin, 'noisy',
+            '#!/usr/bin/env python3\nimport sys,time\nsys.stderr.write("x"*5000000);sys.stderr.flush();time.sleep(10)\n')
         folder = self.base / 'rpc-noise'; folder.mkdir()
         result = gm_appserver.execute(str(binary), self.root, folder, 'review', rt.REVIEW_SCHEMA, 2, dict(os.environ))
         self.assertEqual(result['status'], 'output-limit')
