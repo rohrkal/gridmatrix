@@ -304,6 +304,56 @@ class PortabilityTests(unittest.TestCase):
         # The ledger must also be readable back through the normal path.
         self.assertIn('T1', json.loads(cli(self.root, 'status').stdout)['state']['tasks'])
 
+    def legacy_ledger(self, target, state=None):
+        state = state or gm.empty()
+        blob = gm.git(self.root, 'hash-object', '-w', '--stdin', data=gm.dumps(state)).stdout.strip()
+        tree = gm.git(self.root, 'mktree', data=f'100644 blob {blob}\tledger.json\r\n').stdout.strip()
+        commit = gm.git(self.root, '-c', 'user.name=Gridmatrix', '-c',
+                        'user.email=gridmatrix@localhost', 'commit-tree', tree,
+                        data='legacy Windows ledger\n').stdout.strip()
+        if target.startswith('refs/heads/'):
+            run(self.root, 'push', 'origin', commit + ':' + target)
+        else:
+            run(self.root, 'update-ref', target, commit)
+        return commit
+
+    def test_repair_legacy_cr_ledger_is_exact_and_idempotent(self):
+        cli(self.root, 'init')
+        state = gm.empty(); state['receipts']['preserved'] = {'hash': 'x', 'request': {}, 'time': 'now'}
+        old = self.legacy_ledger('refs/gridmatrix/state', state)
+        self.assertNotEqual(cli(self.root, 'status', ok=False).returncode, 0)
+        repaired = json.loads(cli(self.root, 'repair-ledger', '--actor', 'codex:repair').stdout)
+        self.assertEqual(repaired['status'], 'repaired')
+        self.assertEqual(run(self.root, 'rev-parse', repaired['commit'] + '^'), old)
+        self.assertEqual(run(self.root, 'ls-tree', '--name-only', repaired['commit']), 'ledger.json')
+        self.assertIn('preserved', json.loads(cli(self.root, 'status', '--all').stdout)['state']['receipts'])
+        again = json.loads(cli(self.root, 'repair-ledger', '--actor', 'codex:repair').stdout)
+        self.assertEqual(again['status'], 'already-healthy')
+        self.assertEqual(again['commit'], repaired['commit'])
+
+    def test_repair_legacy_cr_ledger_remote_and_refuses_other_damage(self):
+        bare = self.base / 'remote.git'; bare.mkdir(); run(bare, 'init', '--bare')
+        run(self.root, 'remote', 'add', 'origin', str(bare))
+        cli(self.root, 'init', '--remote', 'origin')
+        self.legacy_ledger('refs/heads/gridmatrix-state')
+        self.assertNotEqual(cli(self.root, 'status', ok=False).returncode, 0)
+        repaired = json.loads(cli(self.root, 'repair-ledger', '--actor', 'claude-code:repair').stdout)
+        self.assertEqual(repaired['status'], 'repaired')
+        self.assertEqual(json.loads(cli(self.root, 'status').stdout)['state']['tasks'], {})
+
+        config_path = self.root / '.gridmatrix/config.json'
+        config = json.loads(config_path.read_text(encoding='utf-8')); config['remote'] = None
+        config_path.write_text(json.dumps(config), encoding='utf-8')
+        wrong_blob = gm.git(self.root, 'hash-object', '-w', '--stdin', data=gm.dumps(gm.empty())).stdout.strip()
+        wrong_tree = gm.git(self.root, 'mktree', data=f'100644 blob {wrong_blob}\tnot-ledger.json\n').stdout.strip()
+        wrong = gm.git(self.root, '-c', 'user.name=Gridmatrix', '-c',
+                       'user.email=gridmatrix@localhost', 'commit-tree', wrong_tree,
+                       data='other damage\n').stdout.strip()
+        run(self.root, 'update-ref', 'refs/gridmatrix/state', wrong)
+        failed = cli(self.root, 'repair-ledger', '--actor', 'codex:repair', ok=False)
+        self.assertIn('repair refused', failed.stderr)
+        self.assertEqual(run(self.root, 'rev-parse', 'refs/gridmatrix/state'), wrong)
+
     def test_unicode_inherited_instructions_survive_install(self):
         # Reads once used the locale encoding while writes used UTF-8, so on a
         # cp1252 console non-ASCII text was silently re-encoded into mojibake.

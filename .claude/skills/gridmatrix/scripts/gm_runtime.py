@@ -14,17 +14,18 @@ import time
 from types import SimpleNamespace
 import uuid
 
-COMMANDS = {'doctor', 'upgrade', 'evidence', 'peer', 'integrate', 'guard', 'metrics', 'hook', 'mcp'}
+COMMANDS = {'doctor', 'upgrade', 'evidence', 'peer', 'integrate', 'guard', 'metrics', 'hook', 'mcp', 'next', 'watch'}
 REVIEW_SCHEMA = {
     'type': 'object', 'additionalProperties': False,
     'properties': {
         'verdict': {'type': 'string', 'enum': ['pass', 'changes']},
         'summary': {'type': 'string'}, 'limits': {'type': 'string'},
+        'inspected': {'type': 'array', 'minItems': 1, 'items': {'type': 'string'}},
         'findings': {'type': 'array', 'items': {
             'type': 'object', 'additionalProperties': False,
             'properties': {k: {'type': 'string'} for k in ['severity', 'location', 'problem', 'evidence']},
             'required': ['severity', 'location', 'problem', 'evidence']}}
-    }, 'required': ['verdict', 'summary', 'limits', 'findings']}
+    }, 'required': ['verdict', 'summary', 'limits', 'inspected', 'findings']}
 
 
 def api(core):
@@ -327,11 +328,100 @@ def validate_review(value, g):
     g.require(value['verdict'] in ('pass', 'changes'), 'invalid peer verdict')
     g.require(all(isinstance(value[k], str) and value[k].strip() for k in ('summary', 'limits')), 'missing peer summary/limits')
     g.require(isinstance(value['findings'], list), 'findings must be a list')
+    g.require(isinstance(value['inspected'], list) and value['inspected'] and
+              all(isinstance(item, str) and item.strip() for item in value['inspected']),
+              'peer must name nonempty inspected evidence')
     for f in value['findings']:
         g.require(isinstance(f, dict) and set(f) == {'severity', 'location', 'problem', 'evidence'}, 'invalid finding fields')
         g.require(f['severity'] in ('S0', 'S1', 'S2', 'S3') and all(isinstance(x, str) and x.strip() for x in f.values()), 'invalid finding')
     g.require(value['verdict'] != 'pass' or not any(f['severity'] in ('S0', 'S1') for f in value['findings']), 'pass contradicts blocking findings')
+    g.require(value['verdict'] != 'changes' or value['findings'],
+              'changes verdict requires at least one actionable finding')
     return value
+
+
+def actionable(root, state, who, g):
+    """Return the compact work another session can act on without builder rationale."""
+    platform_name = g.actor(who)
+    items = []
+    for nid, notice in sorted(state.get('notices', {}).items()):
+        if (notice.get('status') == 'open' and notice.get('to') in ('*', platform_name)
+                and notice.get('from') != who):
+            items.append({'key': 'notice:' + nid, 'kind': 'notice', 'notice': nid,
+                          'task': notice.get('task'), 'severity': notice.get('severity'),
+                          'action': 'acknowledge-or-answer', 'summary': notice.get('summary')})
+        elif (notice.get('blocking') and notice.get('from') == who
+              and notice.get('status') in ('acknowledged', 'disputed')):
+            response = (notice.get('responses') or [{}])[-1]
+            items.append({'key': 'verify-notice:' + nid + ':' + notice['status'], 'kind': 'notice',
+                          'notice': nid, 'task': notice.get('task'), 'severity': notice.get('severity'),
+                          'action': 'verify-or-resolve-reported-blocker', 'summary': notice.get('summary'),
+                          'response_actor': response.get('actor'), 'response_action': response.get('action')})
+    for tid, task in sorted(state.get('tasks', {}).items()):
+        status = task.get('status')
+        if status == 'review' and task.get('builder_platform') != platform_name:
+            items.append({'key': 'review:' + tid + ':' + str(task.get('head')), 'kind': 'task',
+                          'task': tid, 'head': task.get('head'), 'action': 'review-exact-head',
+                          'scope': task.get('scope', [])})
+            continue
+        if task.get('owner') != who:
+            continue
+        if status == 'building' and (task.get('review') or {}).get('verdict') == 'changes':
+            if not g.blockers(state, tid):
+                items.append({'key': 'resubmit:' + tid + ':' + str(task.get('head')), 'kind': 'task',
+                              'task': tid, 'head': task.get('head'), 'action': 'fix-and-resubmit',
+                              'scope': task.get('scope', [])})
+        elif status == 'approved':
+            record = task.get('integration')
+            action = 'run-integration-candidate'
+            detail = {}
+            if record:
+                action = 'advance-integration-target'
+                try:
+                    current = target_head(root, record['target_ref'], g)
+                    current_tree = g.git(root, 'rev-parse', current + '^{tree}').stdout.strip()
+                    task_on_target = not g.git(root, 'merge-base', '--is-ancestor', task['head'], current,
+                                               check=False).returncode
+                    task_tree = g.git(root, 'rev-parse', task['head'] + '^{tree}').stdout.strip()
+                    if current_tree == record['tree']:
+                        action = 'finish-integrated-task'; detail['integrated_commit'] = current
+                    elif task_on_target and task_tree == record['tree']:
+                        action = 'finish-integrated-task'; detail['integrated_commit'] = task['head']
+                    detail.update(target_ref=record['target_ref'], target_head=current)
+                except (g.Error, OSError, ValueError) as exc:
+                    action = 'inspect-integration-target'
+                    detail['target_error'] = scrub(str(exc))
+            item = {'key': 'approved:' + tid + ':' + action, 'kind': 'task', 'task': tid,
+                    'head': task.get('head'), 'action': action}
+            item.update(detail); items.append(item)
+    return items
+
+
+def next_work(root, who, g):
+    head, state = g.Ledger(root).load()
+    return {'actor': who, 'ledger_commit': head, 'items': actionable(root, state, who, g)}
+
+
+def watch(root, who, timeout, poll, include_existing, g):
+    g.require(1 <= timeout <= 86400, 'watch timeout must be 1..86400 seconds')
+    g.require(0.1 <= poll <= 60, 'watch poll interval must be 0.1..60 seconds')
+    initial = next_work(root, who, g)
+    latest_commit = initial['ledger_commit']
+    seen = {json.dumps(item, sort_keys=True) for item in initial['items']}
+    if include_existing and initial['items']:
+        return dict(initial, status='actionable')
+    deadline = time.monotonic() + timeout
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return {'actor': who, 'status': 'timeout', 'ledger_commit': latest_commit, 'items': []}
+        time.sleep(min(poll, remaining))
+        current = next_work(root, who, g)
+        latest_commit = current['ledger_commit']
+        fresh = [item for item in current['items'] if json.dumps(item, sort_keys=True) not in seen]
+        if fresh:
+            return {'actor': who, 'status': 'actionable', 'ledger_commit': current['ledger_commit'],
+                    'items': fresh}
 
 
 def peer_argv(binary, name, folder, model, turns, dollars):
@@ -439,9 +529,11 @@ def peer(root, args, g):
                 g.require(result_path.is_file() and result_path.stat().st_size <= 1024 * 1024, 'missing/oversized Codex result')
                 value = json.loads(result_path.read_text(encoding='utf-8'))
             value = validate_review(value, g)
-            value = {k: ([{fk: scrub(fv) for fk, fv in f.items()} for f in v] if k == 'findings' else scrub(v)) for k, v in value.items()}
+            value = {k: ([{fk: scrub(fv) for fk, fv in f.items()} for f in v]
+                         if k == 'findings' else [scrub(item) for item in v]
+                         if k == 'inspected' else scrub(v)) for k, v in value.items()}
             report.update(passed=True, acknowledged=True, result=value)
-        except (g.Error, OSError, ValueError, TypeError) as exc:
+        except (g.Error, OSError, ValueError, TypeError, KeyError) as exc:
             report.update(passed=False, error=scrub(str(exc)))
         ctx = g.context_at(worktree); ctx['runtime_record'] = True
         completion = {'id': rid, 'op': 'peer-complete', 'actor': args.actor, 'task': args.task, 'report': report}
@@ -491,6 +583,11 @@ def dispatch(argv, core):
     p.add_argument('--repo', default='.')
     sub = p.add_subparsers(dest='command', required=True)
     sub.add_parser('doctor'); sub.add_parser('metrics')
+    nxt = sub.add_parser('next'); nxt.add_argument('--actor', required=True)
+    watcher = sub.add_parser('watch'); watcher.add_argument('--actor', required=True)
+    watcher.add_argument('--timeout', type=int, default=300)
+    watcher.add_argument('--poll', type=float, default=2.0)
+    watcher.add_argument('--include-existing', action='store_true')
     up = sub.add_parser('upgrade'); up.add_argument('--actor', required=True)
     for name in ['evidence', 'integrate', 'peer']:
         a = sub.add_parser(name)
@@ -517,6 +614,10 @@ def dispatch(argv, core):
     root = g.root_at(args.repo)
     if args.command == 'doctor':
         result = doctor(root, g)
+    elif args.command == 'next':
+        result = next_work(root, args.actor, g)
+    elif args.command == 'watch':
+        result = watch(root, args.actor, args.timeout, args.poll, args.include_existing, g)
     elif args.command == 'upgrade':
         ledger = g.Ledger(root)
         _, state = ledger.load()
