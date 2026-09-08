@@ -184,11 +184,14 @@ returning a Claude/Codex-shaped response is never reported as a live model test.
 Shared session labels and reports remain cooperative metadata, not cryptographic
 model attestation. Use normal OS isolation and project protections.
 
-**No peer adapter has executed in either maintainer environment.** Neither a
-Claude nor a Codex CLI was installed, so `doctor` reports `missing-cli` and every
-adapter behaviour below is verified by unit tests and code reading only. Treat a
-passing suite as evidence the plumbing is consistent, never as evidence that a
-live peer review has ever run.
+**No peer adapter has been exercised as a live peer run.** Be precise about why:
+a real `codex` executable can exist on a maintainer machine and still not be on
+`PATH` in the other platform's shell, where `doctor` then reports `missing-cli`.
+Presence is not authentication, and a test that picks up a real binary through an
+inherited `PATH` is a fixture-selection bug, not live validation. Every adapter
+behaviour below is verified by unit tests and code reading only. Treat a passing
+suite as evidence the plumbing is consistent, never as evidence that a live peer
+review has run.
 
 References: [Codex exec](https://developers.openai.com/codex/non-interactive-mode),
 [App Server](https://developers.openai.com/codex/app-server),
