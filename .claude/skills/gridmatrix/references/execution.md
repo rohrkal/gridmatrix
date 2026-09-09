@@ -1,23 +1,13 @@
-# Execution adapters (2.1.1)
-
-## Contents
-
-- Capability discovery and bounded peers
-- Evidence and integration
-- Recovery
-- Hooks and MCP
-- Limits and compatibility
+# Execution adapters (2.2.0)
 
 ## Capability discovery and bounded peers
 
-`doctor` reports installed CLIs, versions and required flag availability, plus
-coordination read access and installed-copy differences against the running skill.
-`live_pair_ready` is false when a CLI is absent and null when execution is unverified.
-Recent successful run records are shown separately as historical observations;
-they do not certify current authentication or live availability.
-Doctor never reads credential files or treats installation
-as authentication. Both CLIs are optional; a successful actual run is the execution
-probe. Missing tools leave a manual handoff and review pending.
+`doctor` reports installed CLIs, versions, required flags, coordination read access
+and installed-copy differences against the running skill. `live_pair_ready` is false
+when a CLI is absent and null when execution is unverified. Past run records are
+history and certify nothing about current availability. Doctor never reads
+credentials and never treats installation as authentication; only a successful run
+probes execution. Missing tools leave a manual handoff.
 
 ```sh
 python3 "$GM" doctor
@@ -27,13 +17,11 @@ python3 "$GM" peer --task T-002 --actor claude-code:SESSION --to codex \
   --adapter app-server --kind spec --id spec-002 --timeout 300
 ```
 
-The coordinator must own the task. Review requires a submitted clean head; spec
-review requires a building task with a written agreement. A disposable worktree
-contains the exact source. The prompt contains the spec and scope without builder
-rationale. The response schema requires verdict, findings, summary and limits.
-A valid review creates notices and a review record under the actual invoked
-platform's generated identity. A successful run with verdict `changes` still
-requires fixes. A failed run never supplies approval.
+The coordinator must own the task; review needs a submitted clean head, spec review
+a building task with a written agreement. The peer sees a disposable worktree and a
+prompt carrying spec and scope without builder rationale. Its response must supply
+verdict, findings, summary, limits and nonempty `inspected` evidence. A `changes`
+verdict still requires fixes, and a failed run never supplies approval.
 
 Adapters:
 
@@ -47,17 +35,15 @@ Adapters:
   `--resume-run ID` resumes a recorded incomplete Codex App Server thread only for
   the same task/source head. This preserves platform session provenance.
 
-One active peer run per task is enforced in the atomic ledger; default maximum
-three starts per task (operator-selectable 1–10). `GRIDMATRIX_PEER_DEPTH` prevents
-recursive Gridmatrix dispatch; child prompts prohibit other delegation too. This
-is not a sandbox against arbitrary programs. Keep platform safeguards in effect.
-Timeouts/output limits terminate the process tree. Every paid retry needs a new
-run ID; replaying identical completed inputs returns the previous record.
-An ambiguous/interrupted start requires inspection and explicit recovery first.
+One active peer run per task, default maximum three starts (operator-selectable
+1-10). `GRIDMATRIX_PEER_DEPTH` prevents recursive dispatch and child prompts
+prohibit further delegation. This is not a sandbox: keep platform safeguards in
+effect. Timeouts terminate the process tree, and a timed-out run that cannot release
+its review worktree is reported failed rather than approved. Every paid retry needs
+a new run ID; an interrupted start needs inspection and recovery first.
 
-Model is optional: use an explicitly requested model, otherwise the platform's
-configured default, recorded as unreported if the adapter cannot identify it.
-Never infer actual model identity from platform name. CLI versions are captured.
+Model is optional: an explicitly requested one, else the platform default, recorded
+as unreported when unidentifiable. Never infer model identity from platform name.
 
 ## Evidence and integration
 
@@ -67,12 +53,12 @@ Write request/command files outside the source worktree. Example commands file:
 [["python3", "-m", "unittest", "discover", "-s", "tests"]]
 ```
 
-Commands are argv arrays, executed directly without a shell. They are ordinary
-programs, not sandboxed by Gridmatrix: inspect them and use existing authorization.
-Do not pass secrets; redaction is best effort. Redacted logs stay in the local Git
-common directory's `gridmatrix-runtime/RUN` folder. Ledger records carry hashes,
-short tails, exit status and metadata; local paths are not remote artifact links.
-Upload sanitized artifacts separately when the peer needs complete remote logs.
+Commands are argv arrays run directly without a shell. They are ordinary programs,
+not sandboxed by Gridmatrix, so inspect them and rely on existing authorization. Do
+not pass secrets; redaction is best effort. Redacted logs stay in the local Git
+common directory's `gridmatrix-runtime/RUN` folder, and ledger records carry hashes,
+tails, exit status and metadata rather than remote artifact links - upload sanitized
+artifacts separately when a peer needs full logs.
 
 ```sh
 python3 "$GM" evidence --task T-001 --actor codex:SESSION \
@@ -108,12 +94,12 @@ resolutions need a new review/candidate. Gridmatrix does not configure repositor
 protections or silently enable auto-merge. A merge queue/required checks can close
 the race between a local pre-merge check and the actual merge.
 
-## Recovery
+## Recovery, cold start and legacy repair
 
-`apply --authorize-recovery request.json` is an explicit operator action. Only use
-it with existing user authorization to recover the named task/notice/run. The flag
-records that declaration; it is not independent authentication of a human decision.
-Recovery is deliberately excluded from the MCP tools available to peers.
+`apply --authorize-recovery request.json` is an explicit operator action; use it only
+with existing user authorization for the named task, notice or run. The flag records
+that declaration and is not independent authentication of a human decision. Recovery
+is deliberately excluded from the MCP tools peers can reach.
 
 Task recovery: `op: recover`, task, expected_owner, to (new same-platform actor),
 authorization (user request/decision reference), evidence (old writer stopped and
@@ -131,20 +117,40 @@ its attempt still counts toward the task budget. An explicitly recovered current
 task owner may recover a predecessor run; both identities remain recorded. Never cancel a live process by
 changing ledger state alone. No identity impersonation or automatic timer takeover.
 
+`next --actor PLATFORM:SESSION` returns only what that identity can act on: open
+notices addressed to it, tasks awaiting its review, verdicts on tasks it owns, approved
+work awaiting its integration, and blocking notices it reported that a peer has
+answered. Work owned by a *different* session of the same platform appears as
+`inspect-owner-or-authorized-recovery` with the owning actor named, so a new session
+can discover in-flight work. Visibility is not ownership: taking it still requires
+explicit operator recovery.
+
+`watch --actor PLATFORM:SESSION --timeout SECONDS` baselines current state and returns
+only when something newly actionable appears or the timeout expires. It also watches the
+integration target, because a peer advancing that branch is a Git event with no ledger
+write. It waits without consuming model turns, so idle time costs no budget; never poll
+by taking repeated agent turns.
+
+`repair-ledger --actor PLATFORM:SESSION` repairs one historical defect only: a tree
+whose single entry is `ledger.json` with a trailing carriage return, left by the
+pre-fix Windows runtime. It validates the blob as a supported ledger before writing,
+preserves parent history, publishes with an expected-old update or non-forced push,
+reports `already-healthy` when there is nothing to do, and refuses every other
+malformed shape rather than guessing.
+
 ## Hooks and MCP
 
 `guard --task T --actor PLATFORM:SESSION PATH...` checks branch, workspace,
 status, blockers and literal write scope. It performs no edit.
 
-`hook --install` explicitly merges strict Claude hooks into project settings,
-preserving other hooks. POSIX auto-install uses python3 on PATH. Windows users can
-configure the same `hook` command in their supported shell. Set `GRIDMATRIX_ACTOR`
-and `GRIDMATRIX_TASK` in the launched writer's environment. SessionStart injects
-current state; PreToolUse denies unsupported/out-of-scope writes. Successful checks
-defer to existing Claude permissions. Strict mode denies Bash/PowerShell because
-arbitrary shell writes cannot be safely classified. Run approved checks via the
-coordinator evidence command outside that restricted Claude session. This mode is
-opt-in, not part of ordinary init. It does not intercept external filesystem edits.
+`hook --install` merges strict Claude hooks into project settings, preserving
+others. **Auto-install refuses non-POSIX by design**, so Windows users configure the
+same `hook` command manually in their shell. Set `GRIDMATRIX_ACTOR` and
+`GRIDMATRIX_TASK` for the launched writer. SessionStart injects current state;
+PreToolUse denies out-of-scope writes and defers otherwise to existing Claude
+permissions. Strict mode denies Bash/PowerShell because arbitrary shell writes
+cannot be classified; run approved checks through the evidence command outside that
+session. Opt-in, not part of init, and it does not intercept external edits.
 
 `mcp --actor PLATFORM:SESSION` runs a stdio server using newline JSON-RPC.
 Configure it in either platform with executable python3 and args:
@@ -153,12 +159,12 @@ Configure it in either platform with executable python3 and args:
 ["/absolute/path/to/gridmatrix.py", "--repo", "/absolute/project", "mcp", "--actor", "codex:SESSION"]
 ```
 
-Generate a fresh actor per launched session. Server configuration binds the actor;
-request bodies cannot override it. Tools: read_inbox, claim_task, report_defect,
-submit_review, transact (including scoped remediate). They call the same validated CLI. Runtime execution,
-recovery, integration, ownership cancellation and permission configuration are
-excluded. The local stdio boundary inherits the launcher identity and permissions;
-it is not a remotely authenticated multi-user server.
+Generate a fresh actor per session; server configuration binds it and request
+bodies cannot override it. Tools: read_inbox (actor-filtered, same as `next`),
+claim_task, report_defect, submit_review, transact. Runtime execution, recovery,
+integration, ownership cancellation and permission configuration are excluded. The
+local stdio boundary inherits the launcher's identity and permissions; it is not a
+remotely authenticated multi-user server.
 
 ## Limits and compatibility
 
@@ -168,6 +174,13 @@ platform UI discovery must be exercised in the target environment. A fixture
 returning a Claude/Codex-shaped response is never reported as a live model test.
 Shared session labels and reports remain cooperative metadata, not cryptographic
 model attestation. Use normal OS isolation and project protections.
+
+**No peer adapter has been exercised as a live peer run.** A real `codex` executable
+can exist on a maintainer machine and still be absent from the other platform's
+`PATH`, where `doctor` then reports `missing-cli`: presence is not authentication,
+and a test picking up a real binary through an inherited `PATH` is a
+fixture-selection bug rather than live validation. Every adapter behaviour here is
+verified by unit tests and code reading only.
 
 References: [Codex exec](https://developers.openai.com/codex/non-interactive-mode),
 [App Server](https://developers.openai.com/codex/app-server),
@@ -185,22 +198,20 @@ After a rejecting review, the owner can apply a `remediate` request:
  "evidence":"Correct the reported blank-input failure"}
 ```
 
-Name every current blocking notice and a literal scope contained in the task scope.
-Only task-specific DEFECT/ASSUMPTION blockers qualify; collisions and global
-blockers still require resolution before writing. `guard` and strict hooks permit
-only these scoped edits. A new blocker invalidates the plan until explicitly updated.
-Commit the fix, then run `peer --kind verify` at the clean corrected head. The peer
-receives the named findings and verifies all of them. Its passing completion resolves
-them with its own identity and source SHA; it does not approve the whole task.
-Submit and obtain ordinary independent review afterward. With manual review, the
-original reporter or explicitly recovered verifier can resolve each notice with
-verification evidence; never impersonate an unavailable automated reviewer.
+Name every current blocking notice and a literal scope inside the task scope. Only
+task-specific DEFECT/ASSUMPTION blockers qualify; collisions and global blockers must
+be resolved first, and a new blocker invalidates the plan until updated. `guard` and
+strict hooks permit only these scoped edits. Commit the fix, then run
+`peer --kind verify` at the clean corrected head: the peer verifies all named
+findings and its passing completion resolves them under its own identity and source
+SHA, but does not approve the task, so submit for ordinary review afterward. Under
+manual review the original reporter or an explicitly recovered verifier resolves each
+notice with evidence; never impersonate an unavailable automated reviewer.
 
 Peer completion publishes findings, verdict and execution record in one atomic
-ledger transaction. Interrupted publication leaves a local completion.json in the
-run directory. Retry the identical peer command at the same source head to publish
-that saved result without launching another model. Completed matching requests
-return their previous result even after approval. Changed inputs fail; a new run
-requires a new ID. If the source, ownership or task state changed, preserve the old
-result and recover the obsolete run explicitly instead of applying it to new work.
-Update both platform copies before using these operations.
+transaction. An interrupted publication leaves `completion.json` in the run
+directory; retrying the identical command at the same source head publishes that
+saved result without paying for another model run, and a completed matching request
+replays its previous result even after approval. Changed inputs fail and need a new
+ID. If source, ownership or task state changed, preserve the old result and recover
+the obsolete run explicitly. Update both platform copies before using these.

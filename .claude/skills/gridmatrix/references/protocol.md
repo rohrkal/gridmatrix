@@ -1,4 +1,4 @@
-# Ledger protocol v3 (Gridmatrix 2.1)
+# Ledger protocol v3 (Gridmatrix 2.2.0)
 
 ## Commands
 
@@ -10,6 +10,10 @@ reading the spec and diff, use `status --handoff TASK` to retrieve that rational
 `apply request.json` (or `apply -` with JSON stdin) is the only write entrypoint.
 `check` validates installation; `check --task T-001` additionally checks independent
 approval against the current clean HEAD and outstanding blocking notices.
+`next --actor ACTOR` lists only what that identity can act on.
+`watch --actor ACTOR --timeout N` blocks until something newly actionable appears,
+without consuming model turns. `repair-ledger --actor ACTOR` fixes only the legacy
+`ledger.json` carriage-return tree, and is the only writer among these three.
 
 Use a unique stable `id` per request; retry the *same* body and ID after ambiguous
 network failure. An identical replay returns `already-recorded`; changing the
@@ -23,10 +27,9 @@ identities. The helper does not cryptographically attest which model ran it.
 
 ## Request examples
 
-Claim from a named, clean task branch. Get the full base SHA from Git. Paths are
-literal relative files/directories; `.` reserves the whole project. No globs.
-Reserve generated outputs and dependency lockfiles too. The runtime captures
-branch and hostname + resolved working directory; do not supply invented values.
+Claim from a named, clean task branch with the full base SHA. Scope paths are
+literal files or directories, no globs; `.` reserves the project. Reserve generated
+outputs and lockfiles too. The runtime supplies branch and workspace itself.
 
 ```json
 {
@@ -38,10 +41,10 @@ branch and hostname + resolved working directory; do not supply invented values.
 }
 ```
 
-Submit after committing and sharing source. Use the full HEAD SHA, not a branch
-name. Evidence includes commands, exit codes, observed output and limitations.
-The helper rejects changed paths outside the claim, uncommitted changes and a
-base that is no longer an ancestor. It never runs the evidence text as commands.
+Submit after committing and sharing source, using the full HEAD SHA. Evidence
+gives commands, exit codes, observed output and limitations. The helper rejects
+out-of-scope paths, uncommitted changes and a base that is no longer an ancestor,
+and never executes the evidence text.
 
 ```json
 {
@@ -65,10 +68,9 @@ Review from that clean head, using the other platform's **real** identity:
 }
 ```
 
-Use `changes` for required corrections and log each concrete finding as a notice.
-Use an honest `none` in limitations when everything relevant was verified; do
-not invent a gap to satisfy a template. A `review` transaction is itself a durable
-response to the submitted handoff.
+Use `changes` for required corrections and log each finding as a notice. Write an
+honest `none` in limits when everything relevant was verified; do not invent a gap
+to satisfy a template. A `review` is itself a durable response to the handoff.
 
 ## Operations
 
@@ -78,10 +80,11 @@ Required fields below are in addition to id/op/actor.
 | --- | --- | --- |
 | claim | task, base, goal, scope[], acceptance[] | New ID, clean named branch, no active overlapping scope/workspace/branch |
 | submit | task, head, summary, evidence, not_done, next | Current owner; clears previous review |
-| review | task, head, verdict (pass/changes), evidence, limits | Other platform; exact submitted clean HEAD |
+| review | task, head, verdict (pass/changes), evidence, limits | Other platform; exact submitted clean HEAD. Structured peer output must also name nonempty `inspected` paths, and a `changes` verdict must carry at least one finding: exiting zero is not a review |
 | finish | task, head, integrated_commit, evidence | Owner; exact approved head, captured integration pass and matching actual target tree |
 | cancel | task, evidence | Owner; preserves history and frees scope; never deletes source |
 | transfer | task, to (actor), evidence | Owner relinquishes to same platform session; run from destination; verify old writer stopped; clears review |
+| refresh-base | task, base, target, evidence | Owner, unsubmitted building task, claimed worktree; new base descends from the old one, sits on the target, and is already an ancestor of task HEAD; scope revalidated |
 | notice | task (ID or *), to (platform or *), kind, severity, summary, evidence | Any actor; ID becomes notice ID |
 | ack | notice, evidence | Recipient records understanding/action; does not resolve |
 | dispute | notice, evidence | Recipient states objection; blocker stays blocking |
@@ -89,6 +92,16 @@ Required fields below are in addition to id/op/actor.
 | learn | scope, rule, evidence | Propose bounded project lesson; ID becomes lesson ID |
 | confirm | lesson, evidence | Other platform verifies; maximum ten active lessons |
 | retire | lesson, evidence | Other platform records why a lesson no longer applies; keeps history |
+
+**A stale base is repairable; wrong acceptance is not.** After a transfer or target
+movement a task keeps its original `base`, making everything integrated since read as
+out-of-scope. `refresh-base` fixes exactly that: owner only, only while the task is
+building and unsubmitted, and the new base must descend from the old one, be present on
+the named target, and already be an ancestor of the task HEAD; the resulting diff is
+revalidated against scope before an atomic write recording the prior base. So a writer
+whose target moved updates the task branch to contain the new base first - refreshing
+cannot pull work onto the branch. Acceptance and scope have no such operation, so when
+those are wrong, `cancel` with evidence and re-claim at the current base.
 
 A `COLLISION` always blocks the named task (or all tasks if `task: "*"`).
 S0 = dangerous/major correctness loss; S1 = broken acceptance or contract;
@@ -111,66 +124,54 @@ keep review pending or use explicitly authorized identity recovery; no fake ACKs
 
 ## Consistency and enforcement boundaries
 
-The ledger lives in `ledger.json` on a dedicated Git ref. Transactions read the
-latest state, validate all preconditions, create an immutable commit and atomically
-advance the ref. Local mode uses `git update-ref NEW EXPECTED_OLD` across the shared
-Git directory. Remote mode uses ordinary fast-forward pushes to one shared branch.
-Competing writes re-read and revalidate up to three times. Never force-push this
-branch, apply stale snapshots, edit ledger.json manually, or fall back offline.
-The source worktree/index is untouched by these transactions.
+The ledger is `ledger.json` on a dedicated Git ref. A transaction reads current
+state, validates every precondition, commits immutably and advances the ref
+atomically: locally via `git update-ref NEW EXPECTED_OLD`, remotely via fast-forward
+push to one shared branch, revalidating up to three times on contention. Never
+force-push it, apply a stale snapshot, hand-edit `ledger.json`, or fall back
+offline. Source worktrees and indexes are untouched. Use the same remote branch in
+every clone; an outage fails closed, a lost response can be retried by ID, and
+`status` resolves ambiguity before repeating anything. Pushing the task branch is
+separate: do it before inviting remote review.
 
-Use the same configured remote branch across all clones. A remote outage fails
-closed. Lost successful responses can be retried by ID. Inspect `status` when
-failure is ambiguous before repeating other actions. Source commit transfer is
-separate: push the task branch before inviting remote review.
+The helper enforces claims, lifecycle, identity labels, message resolution and
+commit matching. It cannot stop edits made through other shell tools, judge test
+adequacy, prevent forged actor labels, or make a ledger check atomic with a later
+merge. CI, branch protections and one authorized integrator remain necessary where
+enforcement must be strong; never broaden hooks or permissions silently. `finish`
+verifies target membership and the tested tree, not deployment or CI success, and
+captured runs establish execution while free text stays an attributed claim.
 
-The helper mechanically enforces cooperative claims, lifecycle, identity labels,
-message resolution and commit matching. It cannot stop an agent from using other
-shell tools to edit files, judge test adequacy, prevent forged actor labels,
-or provide atomicity between a ledger check and a later source merge. Project CI,
-branch protections and an authorized single integrator remain necessary where
-strong enforcement is required. Do not install or broaden hooks/permissions
-silently. `finish` verifies target commit membership and the tested tree; it does
-not prove deployment or CI success. Captured runs establish command execution;
-free-text evidence remains an attributed claim.
-
-No daemon is bundled. Active agents check at boundaries; dormant agents read next
-session. Both source and ledger access must be demonstrated before claiming live
-cross-platform operation. A direct platform bridge can reduce pickup latency,
-but the ledger remains the recoverable source of coordination state.
+No daemon is bundled: active agents check at boundaries, dormant ones next session.
+Demonstrate both source and ledger access before claiming live cross-platform
+operation. A direct bridge can cut pickup latency, but the ledger remains the
+recoverable source of coordination state.
 
 ## Durable learning
 
-`learn` records scope, a checkable rule and concrete evidence (notice/task IDs,
-reproductions, successful techniques). `confirm` requires the other platform;
-only active lessons guide future sessions. `retire` preserves the earlier rule
-and the reason it stopped applying. Git history and receipts retain provenance.
-The default status omits closed records to reduce context; consult `--all` only
-for relevant history. The ledger is intentionally project-scoped, not a global
-instruction or credential store. A large project's archive/compaction needs an
-explicit history-preserving migration; this version does not silently prune it.
+`learn` records scope, a checkable rule and evidence; `confirm` requires the other
+platform and only active lessons guide future sessions; `retire` keeps the rule and
+why it stopped applying. Default `status` omits closed records, so consult `--all`
+only for relevant history. The ledger is project-scoped, not a global instruction or
+credential store, and archiving a large one needs an explicit history-preserving
+migration rather than silent pruning.
 
 ## Execution and learning extensions
 
-Read [execution.md](execution.md) for captured runs, peer adapters, integration,
-operator recovery, hooks and MCP. New claims accept depends_on (completed task IDs),
-contracts (relative path → agreed Git blob SHA), task_class and model.
-Submit optionally accepts evidence_runs (captured passing IDs at the same HEAD).
+See [execution.md](execution.md) for captured runs, peer adapters, integration,
+recovery, hooks and MCP. Claims additionally accept `depends_on` (completed task
+IDs), `contracts` (path → agreed Git blob SHA), `task_class` and `model`. Submit
+accepts `evidence_runs` (captured passing IDs at the same HEAD).
 
-`measure`: completed task, escaped_defects and rework_rounds (nonnegative integers),
-evidence. Measurements are attributed observations, not automatic performance scores.
-`lesson-outcome`: lesson, task, result (helped/recurred/not-applicable), evidence.
-`metrics` returns comparable task and lesson observations without promoting rules.
+`measure` (completed task, escaped_defects, rework_rounds, evidence) and
+`lesson-outcome` (lesson, task, result, evidence) record attributed observations,
+not automatic performance scores; `metrics` returns them without promoting rules.
+`remediate` (task, all current blocking notice IDs, in-scope paths, evidence) is
+owner-only from the claimed building worktree and leaves approval blocked until
+independent resolution.
 
-Runtime-only capture/integration events are written by the runner; ordinary
-`apply` cannot manufacture a capture by supplying report fields. Operator recovery
-requires a separate explicit CLI flag and records the authorization statement.
-These are cooperative controls, not a security boundary against arbitrary code.
-
-`remediate`: task, notices (all current blocking IDs), scope (within task scope),
-evidence. Only the owner in the claimed building worktree can record this plan.
-Approval stays blocked until independent resolution. See execution.md.
-
-`peer-complete` is runtime-only: it atomically validates and publishes the peer's
-findings, optional remediation resolution, review and completed execution record.
-A stale or invalid transaction publishes none of these changes.
+Capture, integration and `peer-complete` are runtime-only: ordinary `apply` cannot
+manufacture them by supplying report fields, and an invalid peer transaction
+publishes nothing. Operator recovery requires its own explicit CLI flag and records
+the authorization statement. These are cooperative controls, not a security
+boundary against arbitrary code.
