@@ -91,7 +91,7 @@ runs with explicit authorization.
 
 Run `doctor` to discover available capabilities and compare project copies with
 the running skill. Historical peer results are shown separately from live readiness. The adapters have controlled
-subprocess coverage. The Windows suite currently passes 54 tests with two explicit
+subprocess coverage. The Windows suite currently passes 59 tests with two explicit
 environment skips; the repository CI matrix adds Windows and Linux but has not run
 until this work is published. **Live Claude/Codex peer execution is still awaiting
 validation on authenticated CLIs.** Commands, configuration and limits are in
@@ -134,6 +134,18 @@ Projects created by the pre-fix Windows runtime can contain a ledger entry named
 state. `repair-ledger --actor PLATFORM:SESSION` repairs only that exact one-entry
 legacy shape, validates the ledger before writing, preserves its parent history,
 and never force-pushes. It refuses unrelated malformed coordination refs.
+
+If a transferred task keeps an older base, first update its task branch so the new
+target commit is an ancestor of its current `HEAD`, then apply `refresh-base` with
+that full commit and target ref. Only the current owner of an unsubmitted building
+task can do this; Gridmatrix requires forward ancestry, verifies the base is on the
+named target, rechecks the resulting diff against the owned scope, and records the
+previous base. Wrong acceptance or scope still requires canceling and re-claiming.
+
+Every ledger request has an immutable ID and body fingerprint. After an ambiguous
+delivery failure, retry the exact same body and ID: a recorded request replays as
+`already-recorded` before later worktree drift can invalidate preflight. Changing
+any field under that ID is rejected.
 
 The canonical skill is [skills/gridmatrix/SKILL.md](skills/gridmatrix/SKILL.md).
 [Adoption and migration](skills/gridmatrix/references/adoption.md) covers new,
