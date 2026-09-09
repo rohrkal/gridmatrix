@@ -64,7 +64,8 @@ class RuntimeTests(unittest.TestCase):
         self.base = Path(self.temp.name)
         self.root = repo(self.base / 'project')
         cli(self.root, 'init')
-        run(self.root, 'add', 'AGENTS.md', 'CLAUDE.md', '.agents', '.claude', '.gridmatrix')
+        run(self.root, 'add', '.gitattributes', 'AGENTS.md', 'CLAUDE.md',
+            '.agents', '.claude', '.gridmatrix')
         run(self.root, 'commit', '-m', 'adopt'); run(self.root, 'checkout', '-b', 'gm/task')
         self.head = run(self.root, 'rev-parse', 'HEAD')
         self.claim = claim(); self.claim['base'] = self.head
@@ -168,7 +169,8 @@ class RuntimeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             root = repo(Path(folder) / 'project')
             cli(root, 'init')
-            run(root, 'add', 'AGENTS.md', 'CLAUDE.md', '.agents', '.claude', '.gridmatrix')
+            run(root, 'add', '.gitattributes', 'AGENTS.md', 'CLAUDE.md',
+                '.agents', '.claude', '.gridmatrix')
             run(root, 'commit', '-m', 'adopt'); run(root, 'checkout', '-b', 'gm/task')
             old = run(root, 'rev-parse', 'HEAD')
             request = claim(); request['base'] = old

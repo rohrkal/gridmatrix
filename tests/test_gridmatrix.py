@@ -156,7 +156,8 @@ class GitTests(unittest.TestCase):
 
     def install(self, remote=None):
         cli(self.root, 'init', *(['--remote', remote] if remote else []))
-        run(self.root, 'add', 'AGENTS.md', 'CLAUDE.md', '.agents', '.claude', '.gridmatrix')
+        run(self.root, 'add', '.gitattributes', 'AGENTS.md', 'CLAUDE.md',
+            '.agents', '.claude', '.gridmatrix')
         run(self.root, 'commit', '-m', 'adopt')
         run(self.root, 'checkout', '-b', 'gm/task')
 
@@ -180,6 +181,48 @@ class GitTests(unittest.TestCase):
         self.assertNotEqual(cli(self.root, 'init', ok=False).returncode, 0)
         self.assertFalse((self.root / '.gridmatrix').exists())
         self.assertEqual((self.root / 'AGENTS.md').read_text(), gm.BEGIN + '\nkeep this\n')
+
+    def test_attributes_preserve_user_rules_and_fail_malformed_preflight(self):
+        attributes = self.root / '.gitattributes'
+        attributes.write_bytes(b'*.txt text eol=crlf\r\n')
+        cli(self.root, 'init')
+        first = attributes.read_bytes()
+        self.assertTrue(first.startswith(b'*.txt text eol=crlf\r\n'))
+        self.assertEqual(first.count(gm.ATTR_BEGIN.encode()), 1)
+        self.assertEqual(first.count(gm.ATTR_END.encode()), 1)
+        self.assertLess(first.index(b'.agents/skills/gridmatrix/** -text'),
+                        first.index(gm.ATTR_END.encode()))
+        cli(self.root, 'init')
+        self.assertEqual(attributes.read_bytes(), first)
+
+        attributes.write_bytes(first + b'*.md text eol=lf\r\n')
+        cli(self.root, 'init')
+        moved = attributes.read_bytes()
+        self.assertIn(b'*.txt text eol=crlf\r\n', moved)
+        self.assertIn(b'*.md text eol=lf\r\n', moved)
+        self.assertTrue(moved.rstrip().endswith(gm.ATTR_END.encode()))
+        cli(self.root, 'init')
+        self.assertEqual(attributes.read_bytes(), moved)
+
+        attributes.write_bytes(moved.replace(b'.agents/skills/gridmatrix/** -text',
+                                             b'.agents/skills/gridmatrix/** text'))
+        stale = cli(self.root, 'check', ok=False)
+        self.assertIn('invalid or stale managed attribute block', stale.stderr)
+        cli(self.root, 'init')
+        self.assertEqual(attributes.read_bytes(), moved)
+
+        malformed = [gm.ATTR_BEGIN + '\nuser rule\n',
+                     gm.ATTR_BEGIN + '\n' + gm.ATTR_END + '\n' + gm.ATTR_BEGIN + '\n']
+        for index, text in enumerate(malformed):
+            with self.subTest(markers=index):
+                broken = self.base / ('broken-attributes-' + str(index))
+                broken.mkdir(); run(broken, 'init')
+                marker = text.encode()
+                (broken / '.gitattributes').write_bytes(marker)
+                failed = cli(broken, 'init', ok=False)
+                self.assertIn('malformed Gridmatrix attribute markers', failed.stderr)
+                self.assertEqual((broken / '.gitattributes').read_bytes(), marker)
+                self.assertFalse((broken / '.gridmatrix').exists())
 
     def test_symlink_target_refused(self):
         outside = self.base / 'outside'; outside.mkdir()
@@ -398,6 +441,35 @@ class PortabilityTests(unittest.TestCase):
             self.assertEqual((self.root / dest / 'assets' / 'portability_probe.bin').read_bytes(), blob)
         self.assertFalse((source / 'assets' / 'portability_probe.bin').exists(),
                          'test must not write into the canonical skill source')
+
+    def test_adopted_project_clone_survives_autocrlf_byte_for_byte(self):
+        source = SCRIPT.resolve().parents[1]
+        skill = self.base / 'clone-probe-skill'
+        shutil.copytree(source, skill, ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+        blob = bytes([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) + bytes(range(256))
+        (skill / 'assets' / 'clone_probe.bin').write_bytes(blob)
+        project = self.base / 'autocrlf-project'
+        project.mkdir(); run(project, 'init', '-b', 'main')
+        run(project, 'config', 'user.name', 'Test'); run(project, 'config', 'user.email', 'test@localhost')
+        run(project, 'config', 'core.autocrlf', 'true')
+        (project / 'app.py').write_text('answer = 42\n')
+        probe_cli = skill / 'scripts' / 'gridmatrix.py'
+        installed = subprocess.run([sys.executable, str(probe_cli), '--repo', str(project), 'init'],
+                                   text=True, encoding='utf-8', capture_output=True)
+        self.assertEqual(installed.returncode, 0, installed.stderr)
+        run(project, 'add', '.'); run(project, 'commit', '-m', 'adopt gridmatrix')
+
+        clone = self.base / 'autocrlf-clone'
+        run(self.base, '-c', 'core.autocrlf=true', 'clone', '--no-local', str(project), str(clone))
+        clone_cli = clone / '.agents' / 'skills' / 'gridmatrix' / 'scripts' / 'gridmatrix.py'
+        checked = subprocess.run([sys.executable, str(clone_cli), '--repo', str(clone), 'check'],
+                                 text=True, encoding='utf-8', capture_output=True)
+        self.assertEqual(checked.returncode, 0, checked.stderr)
+        for dest in ('.agents/skills/gridmatrix', '.claude/skills/gridmatrix'):
+            copied = clone / dest / 'assets' / 'clone_probe.bin'
+            self.assertEqual(copied.read_bytes(), blob)
+            self.assertEqual((clone / dest / 'SKILL.md').read_bytes(),
+                             (skill / 'SKILL.md').read_bytes())
 
 if __name__ == '__main__':
     unittest.main()
