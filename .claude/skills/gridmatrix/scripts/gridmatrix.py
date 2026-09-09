@@ -17,6 +17,10 @@ from datetime import datetime, timezone
 VERSION = '2.2.0'
 PLATFORMS = {'codex', 'claude-code'}
 BEGIN, END = '<!-- gridmatrix:begin -->', '<!-- gridmatrix:end -->'
+ATTR_BEGIN, ATTR_END = '# gridmatrix:attributes-begin', '# gridmatrix:attributes-end'
+ATTR_BODY = '''.gitattributes text eol=lf
+.agents/skills/gridmatrix/** -text
+.claude/skills/gridmatrix/** -text'''
 BLOCK = f'''{BEGIN}
 ## Gridmatrix coordination
 Use the gridmatrix skill for coordinated project work. Read .gridmatrix/PROJECT.md
@@ -503,6 +507,28 @@ def managed(old):
         return old[:start] + BLOCK.rstrip('\n') + old[finish + len(END):]
     return old + ('\n\n' if old and not old.endswith('\n\n') else '') + BLOCK
 
+def managed_attributes(old):
+    """Put the byte-fidelity rules last while preserving every user-owned byte."""
+    lines = old.splitlines()
+    begins, ends = lines.count(ATTR_BEGIN), lines.count(ATTR_END)
+    require((begins, ends) in ((0, 0), (1, 1)),
+            'malformed Gridmatrix attribute markers; preserve file and repair explicitly')
+    if begins:
+        require(lines.index(ATTR_BEGIN) < lines.index(ATTR_END),
+                'reversed Gridmatrix attribute markers')
+        start, finish = old.index(ATTR_BEGIN), old.index(ATTR_END)
+        before, after = old[:start], old[finish + len(ATTR_END):]
+        if after.startswith('\r\n'):
+            after = after[2:]
+        elif after.startswith(('\r', '\n')):
+            after = after[1:]
+        old = before + after
+    match = re.search(r'\r\n|\r|\n', old)
+    newline = match.group(0) if match else '\n'
+    block = newline.join((ATTR_BEGIN, *ATTR_BODY.splitlines(), ATTR_END)) + newline
+    separator = '' if not old or old.endswith(newline * 2) else (newline if old.endswith(newline) else newline * 2)
+    return old + separator + block
+
 def safe_target(root, path):
     require(path.resolve().is_relative_to(root.resolve()), f'target escapes project: {path}')
     for p in [path, *path.parents]:
@@ -547,6 +573,9 @@ def install(root, remote, dry):
     if remote:
         require(remote in git(root, 'remote').stdout.splitlines(), 'remote does not exist')
     files = {configpath: dumps(config).encode('utf-8')}
+    attributes = root / '.gitattributes'; safe_target(root, attributes)
+    old_attributes = read_preserving(attributes) if attributes.exists() else ''
+    files[attributes] = managed_attributes(old_attributes).encode('utf-8')
     for name in ('AGENTS.md', 'CLAUDE.md'):
         p = root / name; safe_target(root, p)
         old = read_preserving(p) if p.exists() else ''
@@ -685,8 +714,11 @@ def main(argv=None):
                               for i, t in state['tasks'].items()}
         print(dumps({'transport': ledger.remote or 'local-only', 'ledger_commit': head, 'state': state}), end='')
     else:
-        for name in ('AGENTS.md', 'CLAUDE.md', '.gridmatrix/PROJECT.md'):
+        for name in ('.gitattributes', 'AGENTS.md', 'CLAUDE.md', '.gridmatrix/PROJECT.md'):
             require((root / name).is_file(), 'missing ' + name)
+        attributes = read_preserving(root / '.gitattributes')
+        require(managed_attributes(attributes) == attributes,
+                'invalid or stale managed attribute block; run init')
         ag = (root / 'AGENTS.md').read_text(encoding='utf-8')
         require(ag.count(BEGIN) == ag.count(END) == 1 and ag.index(BEGIN) < ag.index(END), 'invalid managed block')
         require('@AGENTS.md' in (root / 'CLAUDE.md').read_text(encoding='utf-8').splitlines(), 'missing Claude import')

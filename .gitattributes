@@ -6,3 +6,9 @@ skills/gridmatrix/** text eol=lf
 AGENTS.md text eol=lf
 CLAUDE.md text eol=lf
 *.py text eol=lf
+
+# gridmatrix:attributes-begin
+.gitattributes text eol=lf
+.agents/skills/gridmatrix/** -text
+.claude/skills/gridmatrix/** -text
+# gridmatrix:attributes-end
