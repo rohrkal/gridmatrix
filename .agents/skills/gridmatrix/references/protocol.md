@@ -10,10 +10,10 @@ reading the spec and diff, use `status --handoff TASK` to retrieve that rational
 `apply request.json` (or `apply -` with JSON stdin) is the only write entrypoint.
 `check` validates installation; `check --task T-001` additionally checks independent
 approval against the current clean HEAD and outstanding blocking notices.
-`next --actor ACTOR` lists only what that identity can act on; `watch --actor ACTOR
---timeout N` blocks until something newly actionable appears, without consuming model
-turns. `repair-ledger --actor ACTOR` fixes only the legacy `ledger.json`
-carriage-return tree, and is the only writer among these three.
+`next --actor ACTOR` lists only what that identity can act on.
+`watch --actor ACTOR --timeout N` blocks until something newly actionable appears,
+without consuming model turns. `repair-ledger --actor ACTOR` fixes only the legacy
+`ledger.json` carriage-return tree, and is the only writer among these three.
 
 Use a unique stable `id` per request; retry the *same* body and ID after ambiguous
 network failure. An identical replay returns `already-recorded`; changing the
@@ -84,7 +84,7 @@ Required fields below are in addition to id/op/actor.
 | finish | task, head, integrated_commit, evidence | Owner; exact approved head, captured integration pass and matching actual target tree |
 | cancel | task, evidence | Owner; preserves history and frees scope; never deletes source |
 | transfer | task, to (actor), evidence | Owner relinquishes to same platform session; run from destination; verify old writer stopped; clears review |
-| refresh-base | task, base, target, evidence | Owner, unsubmitted building task, claimed worktree; forward-only ancestry, base present on target, scope revalidated |
+| refresh-base | task, base, target, evidence | Owner, unsubmitted building task, claimed worktree; new base descends from the old one, sits on the target, and is already an ancestor of task HEAD; scope revalidated |
 | notice | task (ID or *), to (platform or *), kind, severity, summary, evidence | Any actor; ID becomes notice ID |
 | ack | notice, evidence | Recipient records understanding/action; does not resolve |
 | dispute | notice, evidence | Recipient states objection; blocker stays blocking |
@@ -96,11 +96,12 @@ Required fields below are in addition to id/op/actor.
 **A stale base is repairable; wrong acceptance is not.** After a transfer or target
 movement a task keeps its original `base`, making everything integrated since read as
 out-of-scope. `refresh-base` fixes exactly that: owner only, only while the task is
-building and unsubmitted, the new base must descend from the old one and be present on
-the named target, and the resulting diff is revalidated against scope before an atomic
-write recording the prior base. Acceptance and scope have no such operation, so when
-those are wrong, `cancel` with evidence and re-claim at the current base. Commits are
-untouched; only the ledger record changes.
+building and unsubmitted, and the new base must descend from the old one, be present on
+the named target, and already be an ancestor of the task HEAD; the resulting diff is
+revalidated against scope before an atomic write recording the prior base. So a writer
+whose target moved updates the task branch to contain the new base first - refreshing
+cannot pull work onto the branch. Acceptance and scope have no such operation, so when
+those are wrong, `cancel` with evidence and re-claim at the current base.
 
 A `COLLISION` always blocks the named task (or all tasks if `task: "*"`).
 S0 = dangerous/major correctness loss; S1 = broken acceptance or contract;

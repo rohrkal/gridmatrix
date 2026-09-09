@@ -65,12 +65,12 @@ acceptance or scope is not, so `cancel` with evidence and re-claim. After two ev
 based exchanges without resolution, record both positions and ask the precise unresolved
 user question.
 
-Run `next --actor YOU` at session start and after compaction: it lists only what you can
-act on, and surfaces work owned by a stale session of your own platform as `inspect-
-owner-or-authorized-recovery`. Seeing it is not owning it. Use `watch` to wait for new
-work or integration-target movement; it consumes no model turns, so never poll by taking
-repeated turns. `repair-ledger` fixes only the legacy Windows `ledger.json` carriage-
-return tree and refuses anything else.
+Run `next --actor YOU` at session start and after compaction: it lists only what you
+can act on, and surfaces work owned by a stale session of your own platform as
+`inspect-owner-or-authorized-recovery`. Seeing it is not owning it. Use `watch` to
+wait for new work or integration-target movement; it consumes no model turns, so never
+poll by taking repeated turns. `repair-ledger` fixes only the legacy Windows
+`ledger.json` carriage-return tree and refuses anything else.
 
 Successful ledger writes mean recorded. Only actual peer output/acknowledgment
 establishes receipt. Read [execution.md](references/execution.md) before dispatching:

@@ -1,10 +1,10 @@
 # Adoption and migration
 
-Prerequisites: Python 3.9+ and Git (2.38+ for integration checks). The suite now
-runs on Windows as well as POSIX, though strict hook auto-install remains POSIX-only.
-On Windows use `python`, since `python3` is often a Store alias stub that exits
-without running. The installer is project-local and never changes global agent
-settings or installs launch hooks.
+Prerequisites: Python 3.9+ and Git (2.38+ for integration checks). The suite now runs on
+Windows as well as POSIX, though strict hook auto-install remains POSIX-only. On Windows
+use `python`, since `python3` is often a Store alias stub that exits without running.
+The installer is project-local and never changes global agent settings or installs
+launch hooks.
 
 ## New or inherited project
 
@@ -28,43 +28,42 @@ python3 /path/to/gridmatrix/scripts/gridmatrix.py --repo /path/to/project init -
 python3 /path/to/gridmatrix/scripts/gridmatrix.py --repo /path/to/project init --remote origin
 ```
 
-Choose `--remote origin` when agents use different clones, machines, or cloud
-sandboxes. Confirm that origin is the intended shared project repository. This
-records its name in project config; the first ledger request creates the separate
-`gridmatrix-state` branch there. Both actors must have read/write access to that
-branch. Normal source branches and indexes are untouched by ledger transactions.
-Commit the config and installed project skills so another clone uses the same
-transport. Never merge the coordination branch into a source branch.
+Choose `--remote origin` when agents use different clones, machines, or cloud sandboxes.
+Confirm that origin is the intended shared project repository. This records its name in
+project config; the first ledger request creates the separate `gridmatrix-state` branch
+there. Both actors must have read/write access to that branch. Normal source branches
+and indexes are untouched by ledger transactions. Commit the config and installed
+project skills so another clone uses the same transport. Never merge the coordination
+branch into a source branch.
 
 Omit `--remote` only for agents using worktrees of the **same local Git repository**.
-Its ledger is stored in `refs/gridmatrix/state`, shared through Git's common dir.
-It is not synchronized by ordinary pushes and is not a backup. Independent clones
-in local mode are separate coordinators: never use them for concurrent work.
+Its ledger is stored in `refs/gridmatrix/state`, shared through Git's common dir. It is
+not synchronized by ordinary pushes and is not a backup. Independent clones in local
+mode are separate coordinators: never use them for concurrent work.
 
 `init` is idempotent: it preserves existing transport, refuses implicit transport
 changes, adds only a marked `AGENTS.md` block and the `@AGENTS.md` import in
 `CLAUDE.md`, installs the skill under `.agents/skills/gridmatrix` and
 `.claude/skills/gridmatrix`, preflights paths and markers, and refuses symlink
-destinations. Managed skill files are replaced on update, so keep project
-customizations outside them; extra custom files are never removed. `check` catches
-divergence between copies and from the running skill, so check freshness with the
-intended updated script - an old one cannot discover a newer release.
+destinations. Managed skill files are replaced on update, so keep project customizations
+outside them; extra custom files are never removed. `check` catches divergence between
+copies and from the running skill, so check freshness with the intended updated script -
+an old one cannot discover a newer release.
 
 Fill PROJECT.md from the request, manifests, lockfiles and code, inspecting scripts
-before executing them. Record applicable commands and their actual results,
-including unavailable commands and pre-existing failures. Multiple lockfiles may
-mean separate subprojects rather than a wrong README. Never run installation,
-deployment, migrations or a costly suite automatically without considering existing
-authorization and project requirements.
+before executing them. Record applicable commands and their actual results, including
+unavailable commands and pre-existing failures. Multiple lockfiles may mean separate
+subprojects rather than a wrong README. Never run installation, deployment, migrations
+or a costly suite automatically without considering existing authorization and project
+requirements.
 
 Run `check` for structural validation; it certifies neither adoption facts nor the
-project's tests. Verify discovery by invoking `$gridmatrix` in Codex or
-`/gridmatrix` in Claude Code. Installing the skill for Claude Code takes two
-commands, `/plugin marketplace add OWNER/REPO` then
-`/plugin install gridmatrix@gridmatrix`, because adding a marketplace does not also
-install its plugin. Personal skills or `AGENTS.override.md` can shadow project
-instructions; diagnose and tell the user rather than silently changing global
-configuration.
+project's tests. Verify discovery by invoking `$gridmatrix` in Codex or `/gridmatrix`
+in Claude Code. Installing for Claude Code takes two commands:
+`/plugin marketplace add OWNER/REPO`, then `/plugin install gridmatrix@gridmatrix`.
+Adding a marketplace does not install its plugin. Personal skills or
+`AGENTS.override.md` can shadow project instructions; diagnose and tell the user
+rather than silently changing global configuration.
 
 ## Upgrading an existing installation
 
@@ -76,20 +75,19 @@ updated skill so both project copies match, and commit the reviewed result.
   atomic and preserves tasks, notices, lessons and receipts. Old actors reject
   schema 3 rather than bypass its gates. Existing approvals still need fresh
   integration evidence before `finish`.
-- **From v1:** preserve `.agents/{STATE,TASKS,HANDOFF,REVIEW,DECISIONS,FLAGS}.md`
-  and read open tasks and flags before accepting new claims. Translate active
-  tasks into claims, open flags into notices, and decisions into PROJECT.md or
-  proposed lessons, recording the source file and commit for each. Never carry a
-  v1 audit forward as approval of an unverified head. Resolve inherited references
-  to `gridmatrix-adopt`, `-audit`, `-handoff`, `-retro` and `-session-start`
-  explicitly; the single `gridmatrix` skill now contains all five procedures. Mark
-  legacy files historical and remove old project skill copies only once confirmed
-  Gridmatrix-owned. A personal v1 skill may need disabling in its platform UI.
+- **From v1:** preserve `.agents/{STATE,TASKS,HANDOFF,REVIEW,DECISIONS,FLAGS}.md` and
+  read open tasks and flags before accepting claims. Translate tasks into claims, flags
+  into notices, and decisions into PROJECT.md or proposed lessons, recording the source
+  file and commit for each; never carry a v1 audit forward as approval of an unverified
+  head. Resolve inherited `gridmatrix-adopt`, `-audit`, `-handoff`, `-retro` and
+  `-session-start` references explicitly - the single skill now contains all five. Mark
+  legacy files historical, remove old skill copies only once confirmed Gridmatrix-owned,
+  and disable a personal v1 skill in its platform UI.
 
-Use a new request ID for a new submission. Reusing an identical old ID replays the
-recorded request instead of starting a new lifecycle step.
+Use a new request ID for a new submission: an identical old ID replays the recorded
+request rather than starting a new lifecycle step.
 
 [execution.md](execution.md) covers recovery, bounded execution and optional
 integrations. Use explicit operator recovery rather than assuming a lost actor's
-identity. A GitHub connector is not a local Git transport, both environments need
-the configured coordinator, and no skill grants credentials or installs a peer CLI.
+identity. A GitHub connector is not a local Git transport, both environments need the
+configured coordinator, and no skill grants credentials or installs a peer CLI.

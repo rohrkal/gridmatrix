@@ -117,13 +117,13 @@ its attempt still counts toward the task budget. An explicitly recovered current
 task owner may recover a predecessor run; both identities remain recorded. Never cancel a live process by
 changing ledger state alone. No identity impersonation or automatic timer takeover.
 
-`next --actor PLATFORM:SESSION` returns only what that identity can act on: open notices
-addressed to it, tasks awaiting its review, verdicts on tasks it owns, approved work
-awaiting its integration, and blocking notices it reported that a peer has answered.
-Work owned by a *different* session of the same platform appears as `inspect-owner-or-
-authorized-recovery` with the owning actor named, so a new session can discover in-
-flight work. Visibility is not ownership: taking it still requires explicit operator
-recovery.
+`next --actor PLATFORM:SESSION` returns only what that identity can act on: open
+notices addressed to it, tasks awaiting its review, verdicts on tasks it owns, approved
+work awaiting its integration, and blocking notices it reported that a peer has
+answered. Work owned by a *different* session of the same platform appears as
+`inspect-owner-or-authorized-recovery` with the owning actor named, so a new session
+can discover in-flight work. Visibility is not ownership: taking it still requires
+explicit operator recovery.
 
 `watch --actor PLATFORM:SESSION --timeout SECONDS` baselines current state and returns
 only when something newly actionable appears or the timeout expires. It also watches the
