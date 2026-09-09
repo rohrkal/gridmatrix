@@ -144,6 +144,19 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(refresh['target'], 'refs/remotes/origin/main')
         self.assertEqual(refresh['target_head'], new_base)
 
+    def test_recorded_refresh_replay_ignores_later_preflight_drift(self):
+        new_base = self.move_task_onto_new_base()
+        request = dict(id='refresh', op='refresh-base', actor='codex:a', task='T1',
+                       base=new_base, target='refs/heads/main',
+                       evidence='Task moved onto the current integration target')
+        self.apply(request)
+        (self.root / 'outside.py').write_text('dirty after recorded request\n')
+        replay = json.loads(self.apply(request).stdout)
+        self.assertEqual(replay['status'], 'already-recorded')
+        changed = dict(request, evidence='different body under the same ID')
+        self.assertIn('request id reused with different content',
+                      self.apply(changed, ok=False).stderr)
+
     def test_refresh_base_rejects_wrong_owner_target_and_scope(self):
         new_base = self.move_task_onto_new_base()
         self.assertIn('only the task owner', self.refresh_base(

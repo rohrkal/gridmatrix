@@ -615,6 +615,11 @@ def main(argv=None):
     if args.command == 'apply':
         r = json.load(sys.stdin) if args.file == '-' else json.loads(Path(args.file).read_text(encoding='utf-8'))
         ctx['recovery_authorized'] = args.authorize_recovery
+        _, current = ledger.load()
+        if r.get('id') in current.get('receipts', {}):
+            # A receipt is immutable. Let transition verify the exact fingerprint,
+            # but do not let later worktree/preflight drift break safe retries.
+            print(dumps(ledger.apply(r, ctx)), end=''); return
         gm_runtime.preflight(root, ledger, r, ctx, globals())
         if r.get('op') == 'claim':
             require(ctx['branch'], 'claim requires a named task branch')
