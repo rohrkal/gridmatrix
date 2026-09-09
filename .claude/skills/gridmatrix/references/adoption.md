@@ -44,11 +44,25 @@ mode are separate coordinators: never use them for concurrent work.
 `init` is idempotent: it preserves existing transport, refuses implicit transport
 changes, adds only a marked `AGENTS.md` block and the `@AGENTS.md` import in
 `CLAUDE.md`, installs the skill under `.agents/skills/gridmatrix` and
-`.claude/skills/gridmatrix`, preflights paths and markers, and refuses symlink
-destinations. Managed skill files are replaced on update, so keep project customizations
+`.claude/skills/gridmatrix`, manages a `.gitattributes` block described below,
+preflights paths and markers, and refuses symlink destinations. Managed skill files are replaced on update, so keep project customizations
 outside them; extra custom files are never removed. `check` catches divergence between
 copies and from the running skill, so check freshness with the intended updated script -
 an old one cannot discover a newer release.
+
+`init` also maintains a marked block in the project's `.gitattributes` pinning both
+installed skill trees to `-text`, disabling end-of-line conversion so the bytes on
+disk always match the bytes `check` compares. Without it, a project adopted where
+`core.autocrlf=true` looks healthy to its author and then fails `check` for the next
+person who clones it, because the installed skill returns with CRLF. The block sits
+last because Git applies the final matching rule, so anything appended after it could
+silently defeat the guarantee: `check` therefore rejects a stale or malformed block,
+and rerunning `init` repairs it while preserving every user-owned rule. Malformed or
+duplicated markers refuse rather than rewrite the file. Only the installed trees receive
+`-text`, while `.gitattributes` itself is forced to LF so the bootstrap file cannot
+be converted; `AGENTS.md`, `CLAUDE.md` and `.gridmatrix/` are read as text through
+universal newlines, so conversion there is harmless and they keep the project's own
+preferences.
 
 Fill PROJECT.md from the request, manifests, lockfiles and code, inspecting scripts
 before executing them. Record applicable commands and their actual results, including
