@@ -64,8 +64,7 @@ because hook auto-install refuses non-POSIX by design;
 
 **Baseline before this work**, recorded so the improvement is auditable rather than
 asserted: at upstream 1773a73 on this machine the suite reported
-`Ran 44 tests` / `FAILED (failures=29, errors=4)`. Four root causes were fixed across T-001
-and T-004: text-mode stdin put a carriage return in the `mktree` entry name; reads used the
+`Ran 44 tests` / `FAILED (failures=29, errors=4)`. Four root causes were fixed by the Windows portability work, integrated as T-004: text-mode stdin put a carriage return in the `mktree` entry name; reads used the
 locale encoding while writes used UTF-8; the installer decoded text instead of copying
 bytes; and test fixtures were extensionless shebang scripts invisible to `shutil.which`.
 
@@ -82,7 +81,7 @@ Assign by demonstrated evidence from this project, not platform stereotype.
 
 - **Codex:** runtime recovery and handoff (T-007), user and maintainer documentation
   (T-017), integration-target advancement and publication.
-- **Claude Code:** Windows portability (T-001, T-004), plugin packaging and CI (T-006),
+- **Claude Code:** Windows portability (T-004), plugin packaging and CI (T-006),
   the instruction and reference text, and this project agreement.
 
 Cite a task ID as a CURRENT attribution only once that task is done or approved; an
