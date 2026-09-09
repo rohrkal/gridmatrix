@@ -44,7 +44,7 @@ methodology.
 
 `AGENTS.md` managed block, `CLAUDE.md` (imports `@AGENTS.md`), and
 `docs/skill-development.md` (canonical-source versus generated-snapshot ownership,
-T-009, Codex-owned). Preserve all three; they were not authored by this collaboration alone.
+T-017, Codex-owned). Preserve all three; they were not authored by this collaboration alone.
 
 ## Commands and baseline
 
@@ -80,20 +80,22 @@ any work as shipped. Publication is Codex-owned under user authorisation.
 
 Assign by demonstrated evidence from this project, not platform stereotype.
 
-- **Codex:** runtime recovery and handoff (T-007), development documentation (T-009),
-  integration-target advancement and publication.
+- **Codex:** runtime recovery and handoff (T-007), user and maintainer documentation
+  (T-017), integration-target advancement and publication.
 - **Claude Code:** Windows portability (T-001, T-004), plugin packaging and CI (T-006),
   the instruction and reference text, and this project agreement.
 
-Cite a task ID here only once it is done or approved. In-flight IDs go stale as soon
-as a record is cancelled and re-claimed, which happened four times in this session.
+Cite a task ID as a CURRENT attribution only once that task is done or approved; an
+in-flight ID goes stale the moment a record is cancelled and re-claimed. Historical
+narration below may name cancelled tasks, because the cancellations are the record.
 
-Review outcomes so far: T-001 `changes` then fixed; T-005 `changes` on an S1 version pin
-and an S2 manifest field, cancelled and re-claimed as T-006 because no operation can amend
-acceptance criteria, then `pass`; T-007 `changes` on an actor-filtering gap, then `pass`.
-Four records were cancelled and re-claimed for defects that could not be corrected in
-place. A guarded `refresh-base` now covers the stale-base half of that; wrong acceptance
-criteria still cannot be amended, so those still require cancel-and-reclaim.
+Historical record, naming cancelled tasks deliberately: T-001 `changes` then fixed;
+T-005 `changes` on an S1 version pin and an S2 manifest field, cancelled and re-claimed
+as T-006 because no operation can amend acceptance criteria, then `pass`; T-007
+`changes` on an actor-filtering gap, then `pass`. Four records were cancelled and re-
+claimed for defects that could not be corrected in place. A guarded `refresh-base` now
+covers the stale-base half of that; wrong acceptance criteria still cannot be amended,
+so those still require cancel-and-reclaim.
 
 Escaped defects, recorded accurately rather than flatteringly: Codex caught three Claude
 Code errors — a one-step install claim that the documented flow does not provide, a
