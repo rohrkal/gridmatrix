@@ -37,8 +37,12 @@ methodology.
   `grep` and short scripts at negligible cost. Analysis is done inline by default.
 - **Development machine:** Windows 11, Python 3.14.3, Git 2.54.0.windows.1, with
   `core.autocrlf=true`. That setting caused real defects, not hypothetical ones.
-- **GitHub Actions has never executed.** The repository is unpublished, so the
-  ubuntu/windows matrix added in T-006 remains an untested test.
+- **CI history, stated narrowly.** An Ubuntu-only workflow of two jobs had been
+  running for some time; run 34187344272 at 1773a73 passed on Python 3.9 and 3.12.
+  What had never executed was the **Windows** leg. Run 34319935072 at the published
+  head 9c347a4 is the first four-job Ubuntu plus Windows matrix, and all four jobs
+  passed. Every claim made during development before that point rested on a single
+  Windows machine on Python 3.14.3.
 
 ## Inherited instruction sources
 
@@ -70,10 +74,15 @@ bytes; and test fixtures were extensionless shebang scripts invisible to `shutil
 
 ## Integration state
 
-Integration branch is `main`. **Local `main` and the published repository differ, and that
-distinction is deliberate here because the protocol does not model it:** a task recorded
-`done` has been integrated locally, not released. Confirm `origin/main` before describing
-any work as shipped. Publication is Codex-owned under user authorisation.
+Integration branch is `main`. Published at 9c347a4 on 2026-09-09, verified by an
+independent clone rather than from a report: content spot-checked against the published
+tree, 61 tests passing on that head, the four-job CI matrix green, and the plug-and-play
+contract reproduced end to end - clone the public repo with core.autocrlf=true, adopt a
+new project, commit it, clone that project, and check passes with the installed skill at
+0 CRLF. **The distinction between integrated and released remains worth stating because
+the protocol does not model it:** a task recorded `done` has been integrated locally,
+not necessarily released. Confirm `origin/main` before describing any work as shipped.
+Publication is Codex-owned under user authorisation.
 
 ## Role calibration
 
