@@ -58,10 +58,11 @@ person who clones it, because the installed skill returns with CRLF. The block s
 last because Git applies the final matching rule, so anything appended after it could
 silently defeat the guarantee: `check` therefore rejects a stale or malformed block,
 and rerunning `init` repairs it while preserving every user-owned rule. Malformed or
-duplicated markers refuse rather than rewrite the file. Only the two installed trees
-are pinned; `AGENTS.md`, `CLAUDE.md` and `.gridmatrix/` are read as text through
-universal newlines, so conversion there is harmless and the project keeps its own
-preferences everywhere else.
+duplicated markers refuse rather than rewrite the file. Only the installed trees receive
+`-text`, while `.gitattributes` itself is forced to LF so the bootstrap file cannot
+be converted; `AGENTS.md`, `CLAUDE.md` and `.gridmatrix/` are read as text through
+universal newlines, so conversion there is harmless and they keep the project's own
+preferences.
 
 Fill PROJECT.md from the request, manifests, lockfiles and code, inspecting scripts
 before executing them. Record applicable commands and their actual results, including
